@@ -28,6 +28,11 @@ With `--app`, `--x`/`--y` on `click` and `scroll` are relative to the app's fron
 as `screenshot --app`. `screenshot --app` output now includes the window `frame`, and `find --app` adds a
 `windowCenter` to each match. **Breaking:** before, `--app` on `click` only applied to `--element` and `--x`/`--y` were always screen points.
 
+### Build
+
+- Built, tested and published by GitHub Actions (`aux4/action@v1`) on a macOS runner;
+  publishing is gated on `aux4 test run` passing.
+
 ### Fixes
 
 - `screenshot --app` no longer crashes (exit 134, `CGS_REQUIRE_INIT` assertion); it captures the app's
