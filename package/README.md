@@ -10,6 +10,9 @@ It is built to **work alongside the person using the Mac**: actions run in the b
 on an app that isn't in front, without moving the mouse cursor or changing the frontmost app — and fall
 back to real input only when the background isn't possible.
 
+Agents get the method in-context from the bundled AI skill: `aux4 ai skill computer-mac prompt` (see
+[AI skill](#ai-skill)).
+
 This package is **darwin-only** (macOS). It ships native binaries for `darwin/arm64` and `darwin/amd64`.
 
 ## Installation
@@ -96,6 +99,7 @@ aux4 computer mac click --app Calculator --x 34 --y 211
 
 ```bash
 aux4 computer mac screenshot [--output file.png] [--display 0] [--app "Safari"] [--maxWidth 1568]
+aux4 computer mac screenshot --app "Calculator" --annotate true [--roles actionable|all] [--limit 150]
 aux4 computer mac screen
 aux4 computer mac cursor
 ```
@@ -104,6 +108,27 @@ aux4 computer mac cursor
 front window (via `--app`), even when it's covered by other windows. The image is resized down to `--maxWidth` (default `1568`, a sane upper
 bound for vision models) preserving aspect ratio, and saved as PNG to `--output` (or a temp file if
 omitted).
+
+`--annotate true` turns the screenshot into a set-of-marks image for a vision model: a numbered box on each
+actionable element (buttons, links, fields, checkboxes, menus, pop-ups, tabs, rows; `--roles all` adds text,
+images and headings), and `marks` in the output tell the model what each number is and how to act on it:
+
+```json
+{
+  "n": 10,
+  "ref": "0.0.0.1.0.6",
+  "role": "AXButton",
+  "label": "7",
+  "frame": {"x": 472, "y": 586, "width": 48, "height": 48},
+  "center": {"x": 496, "y": 610},
+  "windowCenter": {"x": 34, "y": 211},
+  "image": {"x": 10, "y": 187, "width": 48, "height": 48}
+}
+```
+
+Act on a mark by its `ref` (`click --element 0.0.0.1.0.6 --app Calculator`) or its `windowCenter`; `image` is the
+box in the PNG's pixels. Elements scrolled out of view are left out; past `--limit` marks the output says
+`truncated`. Without `--app`, the frontmost app's windows are annotated.
 
 ### Three ways to look at an app
 
@@ -289,12 +314,32 @@ aux4 computer mac open com.apple.TextEdit --hidden true
 aux4 computer mac open --file ~/notes.txt [--app "TextEdit"] [--wait 10s]
 aux4 computer mac open --url https://aux4.io
 aux4 computer mac focus "TextEdit"
+aux4 computer mac window list "TextEdit"
+aux4 computer mac window move --app "TextEdit" [--title notes | --index 0] --x 200 --y 150
+aux4 computer mac window resize --app "TextEdit" --width 800 [--height 600]
+aux4 computer mac window minimize|restore|close|raise --app "TextEdit" [--title notes]
+aux4 computer mac window fullscreen true|false --app "TextEdit"
+aux4 computer mac hide "TextEdit"
+aux4 computer mac unhide "TextEdit"
+aux4 computer mac quit "TextEdit" [--force true] [--timeout 5s]
 ```
 
 `open` launches an app, or opens a file or URL (in `--app` or the default app), without bringing it to the
 front (`--mode foreground` to bring it forward). `--wait` returns once the app shows a window — the file's
 window with `--file` — including its `frame`; `--hidden true` launches it hidden. `focus` always brings an
 app to the front.
+
+`window` acts on one of an app's windows (`--title`, `--index` from `window list`, or its main window)
+through Accessibility, in the background: move, resize, minimize, restore, close (pressing the close button;
+a "save changes?" sheet is reported as `dialog`), enter or leave full screen. Each returns the window `before`
+and `after`. `window raise` brings the app to the front, so it's always foreground. `window list` includes
+hidden and minimized windows, which `windows` (on-screen windows of every app) leaves out.
+
+`hide`/`unhide` hide an app or show it again without bringing it to the front. `quit` asks an app to quit
+without activating it and waits for it to exit; an app with unsaved changes may answer with a sheet, which
+`quit` returns as `dialog` (`terminated: false`) for you to answer with `dialog --press`. `--force true`
+kills it (unsaved changes are lost); force-quitting Finder and quitting the Dock, loginwindow and other session
+processes are refused.
 
 Wherever `--app` is accepted, the app can be given by name or by bundle id (`com.apple.TextEdit`).
 
@@ -307,7 +352,8 @@ aux4 computer mac resume
 ```
 
 Every command that sends input or changes state (`click`, `type`, `shortcut`, `scroll`, `drag`, `move`,
-`set`, `select`, `menu --path`, `dialog --press`, `clipboard copy`/`paste`, `open`, `focus`) appends one
+`set`, `select`, `menu --path`, `dialog --press`, `clipboard copy`/`paste`, `open`, `focus`, `window`
+(except `list`), `quit`, `hide`, `unhide`) appends one
 JSON line to `~/Library/Logs/aux4-computer-mac/actions.jsonl` — time, command, app, arguments, mode and
 result or error — including attempts that failed or were refused. Typed text is cut to a short prefix plus
 its length. The file is rotated at 10MB. `log` prints the most recent entries.
@@ -348,6 +394,20 @@ aux4 computer mac clipboard copy
 aux4 computer mac clipboard read
 aux4 computer mac clipboard paste --text "replaced via agent"
 ```
+
+## AI skill
+
+The package ships an AI skill with the method an agent should follow — state, find, OCR fallback,
+`screenshot --annotate` for vision, act by ref / menu / set / select, wait — plus what works in the background and
+when the foreground fallback happens, coordinates, the stop switch and log, permissions and troubleshooting.
+
+```bash
+aux4 ai skill computer-mac prompt
+```
+
+It works on its own; when `aux4/ai-skill` is installed it is listed by `aux4 ai skill list` next to the other
+skills, which is how agents built on `aux4/ai-agent` discover it. For tools that read `SKILL.md` folders,
+export it: `aux4 ai skill export computer-mac --format skill`.
 
 ## Output and errors
 

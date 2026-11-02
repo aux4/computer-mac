@@ -54,13 +54,24 @@ let actionArgNames: [String: [String]] = [
     "set": ["app", "element", "value", "checked", "option", "mode"],
     "select": ["app", "all", "text", "occurrence", "start", "length", "element", "mode"],
     "menu": ["app", "path", "depth", "mode"],
-    "dialog": ["app", "press", "mode"]
+    "dialog": ["app", "press", "mode"],
+    "window": ["action", "app", "title", "index", "mode"],
+    "quit": ["app", "force", "timeout"],
+    "hide": ["app"],
+    "unhide": ["app"]
 ]
+
+// window's arguments depend on its action (move: x y, resize: width height, fullscreen: enabled).
+func actionArgNamesFor(_ command: String, _ args: [String]) -> [String] {
+    if command == "window" { return windowArgNames(argAt(args, 0).lowercased()) }
+    return actionArgNames[command] ?? []
+}
 
 func isActionInvocation(_ command: String, _ args: [String]) -> Bool {
     guard actionArgNames[command] != nil else { return false }
     if command == "menu" { return !argAt(args, 1).isEmpty }
     if command == "dialog" { return !argAt(args, 1).isEmpty }
+    if command == "window" { return argAt(args, 0).lowercased() != "list" }
     return true
 }
 
@@ -79,13 +90,15 @@ final class ActionLog: @unchecked Sendable {
 
     func begin(_ command: String, _ positional: [String]) {
         var named: [String: Any] = [:]
-        for (i, name) in (actionArgNames[command] ?? []).enumerated() {
+        for (i, name) in actionArgNamesFor(command, positional).enumerated() {
             let v = argAt(positional, i)
             if v.isEmpty { continue }
             named[name] = (name == "text" || name == "value") ? truncatedForLog(v) : v
         }
         lock.lock()
-        self.command = command.replacingOccurrences(of: "-", with: " ")
+        var logged = command.replacingOccurrences(of: "-", with: " ")
+        if command == "window" { logged += " " + argAt(positional, 0).lowercased() }
+        self.command = logged
         self.args = named
         self.start = Date()
         lock.unlock()

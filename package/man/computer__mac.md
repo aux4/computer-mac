@@ -2,7 +2,9 @@
 
 The `mac` command groups every command that lets an AI agent see and operate this Mac: `permissions`,
 `screenshot`, `ocr`, `wait`, `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`, `cursor`, `screen`,
-`apps`, `windows`, `open`, `focus`, and `clipboard`. All commands print a single JSON object to stdout. This package only runs on macOS.
+`apps`, `windows`, `window` (list, move, resize, minimize, restore, close, fullscreen, raise), `open`, `focus`,
+`quit`, `hide`, `unhide`, `state`, `menu`, `select`, `set`, `dialog`, `log`, `stop`, `resume` and `clipboard`.
+The method for agents is the `computer-mac` AI skill: `aux4 ai skill computer-mac prompt`. All commands print a single JSON object to stdout. This package only runs on macOS.
 
 Actions run **in the background by default**: with `--app`, `click`, `type`, `scroll`, `shortcut` and
 `clipboard copy/paste` act on that app through Accessibility without moving the cursor or changing the

@@ -31,3 +31,8 @@ jobs:
         with:
           command: test
           build_command: aux4 builder darwin
+
+  # The same live UI test the publish gate runs, so a branch shows it before reaching dev.
+  test-live:
+    needs: [lint]
+    uses: ./.github/workflows/live.yml

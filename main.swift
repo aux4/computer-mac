@@ -1627,19 +1627,32 @@ func cmdScreenshot(_ args: [String]) async {
     let displayArg = argAt(args, 1)
     let appArg = argAt(args, 2)
     let maxWidth = parseInt(argAt(args, 3), default: 1568)
+    let annotate = parseBoolFlag(argAt(args, 4), name: "annotate")
+    let rolesArg = argAt(args, 5).isEmpty ? "actionable" : argAt(args, 5).lowercased()
+    let limitArg = argAt(args, 6)
+    let markLimit = limitArg.isEmpty ? 150 : (Int(limitArg) ?? -1)
+    guard rolesArg == "actionable" || rolesArg == "all" else {
+        fail("Invalid --roles '\(argAt(args, 5))': use actionable or all")
+    }
+    guard markLimit > 0 else {
+        fail("Invalid --limit '\(limitArg)': use a positive number")
+    }
 
     var appWindow: WindowInfo? = nil
     var appName = ""
+    var appPid: pid_t? = nil
     if !appArg.isEmpty {
         guard let app = findRunningApp(named: appArg) else {
             fail("App not running: \(appArg)")
         }
+        appPid = app.processIdentifier
         appName = app.localizedName ?? appArg
         guard let win = frontWindow(pid: app.processIdentifier) else {
             fail("No on-screen window found for app: \(appArg)")
         }
         appWindow = win
     }
+    if annotate { requireAccessibility() }
     requireScreenRecording()
 
     let content: SCShareableContent
@@ -1650,7 +1663,10 @@ func cmdScreenshot(_ args: [String]) async {
     }
 
     var image: CGImage?
+    // The captured area in screen points: what the annotation marks are placed against.
+    var region = CGRect.zero
     if let target = appWindow {
+        region = target.frame
         guard let win = content.windows.first(where: { $0.windowID == target.id }) else {
             fail("No capturable window found for app: \(appArg)")
         }
@@ -1666,6 +1682,7 @@ func cmdScreenshot(_ args: [String]) async {
             fail("Invalid display index: \(displayArg)")
         }
         let display = content.displays[displayIndex]
+        region = display.frame
         let filter = SCContentFilter(display: display, excludingWindows: [])
         do {
             image = try await captureImage(filter: filter, width: display.width, height: display.height)
@@ -1678,7 +1695,21 @@ func cmdScreenshot(_ args: [String]) async {
         fail("Failed to capture screenshot")
     }
 
-    let resized = resizeImage(cgImage, maxWidth: maxWidth)
+    var resized = resizeImage(cgImage, maxWidth: maxWidth)
+    var annotation: [String: Any]? = nil
+    if annotate {
+        // A display capture is annotated with the frontmost app's windows on it.
+        guard let pid = appPid ?? frontmostAppPid() else {
+            fail("No frontmost application to annotate: pass --app")
+        }
+        let result = annotateScreenshot(resized, region: region, capturedWindow: appWindow?.frame, pid: pid,
+                                        roles: rolesArg, limit: markLimit)
+        resized = result.image
+        annotation = result.out
+        if appWindow == nil, let app = NSRunningApplication(processIdentifier: pid) {
+            annotation?["app"] = app.localizedName ?? ""
+        }
+    }
 
     let outputPath: String
     if outputArg.isEmpty {
@@ -1701,6 +1732,9 @@ func cmdScreenshot(_ args: [String]) async {
     if let win = appWindow {
         out["app"] = appName
         out["window"] = ["id": Int(win.id), "title": win.title, "frame": frameJSON(win.frame)]
+    }
+    if let a = annotation {
+        for (k, v) in a { out[k] = v }
     }
     printJSON(out)
 }
@@ -2666,7 +2700,7 @@ let rest = Array(allArgs.dropFirst(2))
 // Input/state commands are recorded in the action log and refused while the stop switch is on.
 if isActionInvocation(command, rest) {
     ActionLog.shared.begin(command, rest)
-    guardStopSwitch(command)
+    guardStopSwitch(command == "window" ? "window " + argAt(rest, 0).lowercased() : command)
 }
 
 switch command {
@@ -2708,6 +2742,10 @@ case "dialog": cmdDialog(rest)
 case "log": cmdLog(rest)
 case "stop": cmdStop()
 case "resume": cmdResume()
+case "window": cmdWindow(rest)
+case "quit": cmdQuit(rest)
+case "hide": cmdHide(rest, hide: true)
+case "unhide": cmdHide(rest, hide: false)
 default:
     fail("Unknown command: \(command)")
 }
