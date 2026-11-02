@@ -1,0 +1,87 @@
+name: Live UI Trial
+
+# Exercises computer-mac against real apps (Calculator, TextEdit) on a macOS
+# GitHub-hosted runner. This is workflow_dispatch-only, not part of the
+# publish gate: hosted macOS runners cannot be granted the Accessibility /
+# Screen Recording TCC permissions non-interactively (no GUI session to click
+# "Allow" in System Settings, and the runner image is wiped between runs), so
+# `aux4 computer mac permissions` is expected to report ungranted on this
+# runner. The job checks permissions first and only attempts the real UI
+# steps if they happen to be granted — otherwise it reports that plainly and
+# exits successfully. See package/RELEASE.md / kb for the observed result.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  live-ui-trial:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install aux4 CLI
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+
+      - name: Install pkger
+        shell: bash
+        run: curl -fsSL https://pkger.aux4.sh | sh
+
+      - name: Build
+        shell: bash
+        run: aux4 builder darwin
+
+      - name: Install package locally
+        shell: bash
+        run: aux4 aux4 releaser install --dir package --noBuild true
+
+      - name: Check permissions
+        id: perms
+        shell: bash
+        run: |
+          aux4 computer mac permissions | tee perms.json
+          ACCESSIBILITY=$(jq -r '.accessibility.granted' perms.json)
+          echo "accessibility=$ACCESSIBILITY" >> "$GITHUB_OUTPUT"
+
+      - name: Live UI trial (Calculator + TextEdit)
+        if: steps.perms.outputs.accessibility == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aux4 computer mac open "Calculator"
+          sleep 1
+
+          for key in 2 5 6 "×" 7 "="; do
+            REF=$(aux4 computer mac find "$key" --role AXButton --app Calculator | jq -r '.matches[0].ref')
+            if [ -z "$REF" ] || [ "$REF" = "null" ]; then
+              echo "::error::could not find Calculator button '$key'"
+              exit 1
+            fi
+            aux4 computer mac click --element "$REF" --app Calculator
+            sleep 0.3
+          done
+
+          sleep 0.5
+          RESULT=$(aux4 computer mac find "1,792" --app Calculator)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null
+
+          aux4 computer mac open "TextEdit"
+          sleep 1
+          aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
+
+      - name: Report permission result
+        if: steps.perms.outputs.accessibility != 'true'
+        shell: bash
+        run: |
+          echo "Accessibility permission is NOT granted on this hosted macOS runner."
+          echo "Hosted GitHub macOS runners have no interactive session to approve a"
+          echo "TCC Accessibility/Screen Recording prompt, so this binary cannot be"
+          echo "pre-authorized here. This job is workflow_dispatch-only for exactly"
+          echo "this reason — it is documentation of the real-world constraint, not"
+          echo "a CI gate. Live verification of computer-mac happens on a real,"
+          echo "permission-granted Mac instead."
