@@ -12,6 +12,12 @@ name: Live UI Trial
 
 on:
   workflow_dispatch: {}
+  push:
+    branches:
+      - dev
+    paths:
+      - 'main.swift'
+      - '.github/workflows/live-ui-trial.yml'
 
 jobs:
   live-ui-trial:
