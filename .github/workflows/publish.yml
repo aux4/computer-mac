@@ -1,0 +1,326 @@
+name: Publish Package
+
+# main -> prod hub (token minted from AUX4_PUBLISHER_* client credentials against
+#         prod SSO; default registry)
+# dev  -> dev hub  (token minted from AUX4_DEV_PUBLISHER_* client credentials
+#         against dev SSO, since the dev hub validates against dev SSO; registry
+#         pointed at the dev hub). Both paths call aux4/action@v1 command:publish;
+#         only the token + registry differ (the SFA-039 dev/prod pattern, mirrors
+#         packages/remote and packages/cloud-remote).
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - '**'
+      - '!.github/**'
+      - '!README.md'
+      - '!LICENSE'
+      - '!.gitignore'
+
+  workflow_dispatch:
+    inputs:
+      level:
+        description: 'Release level (patch, minor, major)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: publish-package-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Lint
+        uses: aux4/action@v1
+        with:
+          command: lint
+          strict: 'true'
+
+  test-darwin:
+    needs: [lint]
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Test
+        uses: aux4/action@v1
+        with:
+          command: test
+          build_command: aux4 builder darwin
+
+      # The Swift binaries can only be built on macOS, but the publish step of
+      # aux4/action runs in Docker, which macOS runners don't have. Hand the
+      # tested binaries to the Linux publish job.
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: package/dist
+          if-no-files-found: error
+
+  # Live UI test on the hosted macOS runner (which grants Accessibility and
+  # Screen Recording): drives real apps in background mode. Publishing waits on it.
+  test-live:
+    needs: [lint]
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install aux4 CLI
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+
+      - name: Install pkger
+        shell: bash
+        run: curl -fsSL https://pkger.aux4.sh | sh
+
+      - name: Build
+        shell: bash
+        run: aux4 builder darwin
+
+      # Run from package/ so aux4 loads the package's own .aux4 (no install
+      # needed); ${packageDir} then resolves to package/, where the binary is linked.
+      - name: Link binary
+        shell: bash
+        run: ln -sf dist/darwin/arm64/aux4-computer-mac package/aux4-computer-mac
+
+      - name: Check permissions
+        shell: bash
+        working-directory: package
+        run: |
+          aux4 computer mac permissions | tee perms.json
+          # This job is a publish gate: a runner without the permissions fails it
+          # rather than silently skipping the live checks.
+          if [ "$(jq -r '.accessibility.granted and .screenRecording.granted' perms.json)" != "true" ]; then
+            echo "::error::Accessibility/Screen Recording not granted on this runner; live UI tests cannot run."
+            exit 1
+          fi
+
+      - name: Live UI test (Calculator + TextEdit)
+        shell: bash
+        working-directory: package
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/screenshots"
+
+          aux4 computer mac open "Calculator"
+          sleep 1
+
+          # Calculator's AXButton labels differ by macOS version (e.g. "Multiply"
+          # on macOS 26, a glyph or lowercase word on older ones), so each key
+          # lists its candidates separated by "|".
+          press() {
+            local keys="$1" REF=""
+            IFS='|' read -ra CANDIDATES <<< "$keys"
+            for key in "${CANDIDATES[@]}"; do
+              REF=$(aux4 computer mac find "$key" --role AXButton --app Calculator | jq -r '[.matches[] | select(.label == "'"$key"'")][0].ref // .matches[0].ref // empty')
+              [ -n "$REF" ] && break
+            done
+            if [ -z "$REF" ]; then
+              echo "::error::could not find Calculator button '$keys'. Buttons on this runner:"
+              aux4 computer mac find "" --role AXButton --app Calculator | jq -r '.matches[].label'
+              exit 1
+            fi
+            aux4 computer mac click --element "$REF" --app Calculator
+            sleep 0.3
+          }
+          for keys in "All Clear|Clear|AC|C" "2" "5" "6" "Multiply|multiply|×|*" "7"; do
+            press "$keys"
+          done
+
+          # wait must notice the result appear: start it before "=" is pressed. Its text match
+          # ignores commas, so 1792 also matches a grouped "1,792".
+          aux4 computer mac wait --app Calculator --text 1792 --timeout 10s > "$RUNNER_TEMP/wait-calculator.json" 2> "$RUNNER_TEMP/wait-calculator.err" &
+          WAIT_PID=$!
+          sleep 1.5
+          press "Equals|equals|="
+          WAIT_RC=0; wait "$WAIT_PID" || WAIT_RC=$?
+          cat "$RUNNER_TEMP/wait-calculator.json" "$RUNNER_TEMP/wait-calculator.err"
+          if [ "$WAIT_RC" != "0" ] || ! jq -e '.waited < 10 and .waited >= 1 and (.matches | length > 0) and (.source == "ax" or .source == "ocr")' "$RUNNER_TEMP/wait-calculator.json" > /dev/null; then
+            echo "::error::wait --app Calculator --text 1792 did not return the result before its timeout (exit $WAIT_RC)"
+            exit 1
+          fi
+          # Once shown, the result must not be reported as gone, and the OCR-only path must see it too.
+          if aux4 computer mac wait --app Calculator --text 1792 --gone true --timeout 1s 2> "$RUNNER_TEMP/wait-gone.err"; then
+            echo "::error::wait --gone reported the shown result as gone"
+            exit 1
+          fi
+          aux4 computer mac wait --app Calculator --text 1792 --source ocr --timeout 10s | tee "$RUNNER_TEMP/wait-calculator-ocr.json" | jq -e '.source == "ocr" and (.matches | length > 0)' > /dev/null
+
+
+          sleep 0.5
+          # Older Calculators show "1792"; newer ones group digits as "1,792".
+          RESULT=$(aux4 computer mac find "1,792" --app Calculator)
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            RESULT=$(aux4 computer mac find "1792" --app Calculator)
+          fi
+          echo "$RESULT"
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::256x7 result not found. Text on Calculator:"
+            aux4 computer mac find "" --role AXStaticText --app Calculator | jq -c '.matches[] | {label, value}'
+            exit 1
+          fi
+
+          # OCR must read the same result from the window's pixels, and its position must land
+          # inside the accessibility element's frame: pixels and accessibility agree on where it is.
+          OCR=""
+          for value in "1,792" "1792"; do
+            OCR=$(aux4 computer mac ocr --app Calculator --text "$value")
+            echo "$OCR" | jq -e '.matches | length > 0' > /dev/null && break
+          done
+          echo "$OCR" | tee "$RUNNER_TEMP/calculator-ocr.json"
+          if ! echo "$OCR" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::OCR did not find the 256x7 result in Calculator's window. OCR read:"
+            aux4 computer mac ocr --app Calculator | jq -c '[.matches[].text]'
+            exit 1
+          fi
+          # The AX element's frame in window coordinates: screen frame minus the window origin
+          # (center - windowCenter).
+          ELEMENT=$(echo "$RESULT" | jq -c '[.matches[] | select(.frame != null and .windowCenter != null)][0]')
+          echo "accessibility element: $ELEMENT"
+          if ! echo "$OCR" | jq -e --argjson el "$ELEMENT" '
+              ($el.center.x - $el.windowCenter.x) as $ox | ($el.center.y - $el.windowCenter.y) as $oy |
+              .matches[0].windowCenter as $c |
+              $c.x >= ($el.frame.x - $ox) and $c.x <= ($el.frame.x - $ox + $el.frame.width) and
+              $c.y >= ($el.frame.y - $oy) and $c.y <= ($el.frame.y - $oy + $el.frame.height)' > /dev/null; then
+            echo "::error::OCR windowCenter $(echo "$OCR" | jq -c '.matches[0].windowCenter') is outside the accessibility frame of the result"
+            exit 1
+          fi
+
+          # A point OCR reports must hit the right control: click the "7" key at its OCR windowCenter
+          # and check that Accessibility pressed the button labelled "7".
+          KEY=$(aux4 computer mac ocr --app Calculator --text 7 | jq -c '[.matches[] | select(.text == "7")] | max_by(.windowCenter.y) | .windowCenter // empty')
+          echo "OCR located the 7 key at $KEY"
+          if [ -z "$KEY" ]; then
+            echo "::error::OCR did not find the 7 key. OCR read:"
+            aux4 computer mac ocr --app Calculator | jq -c '[.matches[].text]'
+            exit 1
+          fi
+          PRESSED=$(aux4 computer mac click --app Calculator --x "$(echo "$KEY" | jq .x)" --y "$(echo "$KEY" | jq .y)" --mode background)
+          echo "$PRESSED"
+          if ! echo "$PRESSED" | jq -e '.element.label == "7"' > /dev/null; then
+            echo "::error::clicking the OCR position of the 7 key did not press the 7 button"
+            exit 1
+          fi
+
+          aux4 computer mac open "TextEdit"
+          # wait --app alone: TextEdit is running with an on-screen window.
+          aux4 computer mac wait --app TextEdit --timeout 20s | tee "$RUNNER_TEMP/wait-textedit-window.json" | jq -e '.source == "app" and (.matches | length > 0)' > /dev/null
+          sleep 1
+          # wait for the typed text: started before typing, so it has to see it arrive.
+          aux4 computer mac wait --app TextEdit --text "Hello from aux4/computer-mac CI" --timeout 10s > "$RUNNER_TEMP/wait-textedit.json" 2> "$RUNNER_TEMP/wait-textedit.err" &
+          WAIT_PID=$!
+          sleep 1
+          aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
+          WAIT_RC=0; wait "$WAIT_PID" || WAIT_RC=$?
+          cat "$RUNNER_TEMP/wait-textedit.json" "$RUNNER_TEMP/wait-textedit.err"
+          if [ "$WAIT_RC" != "0" ] || ! jq -e '.waited < 10 and (.matches | length > 0)' "$RUNNER_TEMP/wait-textedit.json" > /dev/null; then
+            echo "::error::wait --app TextEdit --text did not see the typed text before its timeout (exit $WAIT_RC)"
+            exit 1
+          fi
+          TYPED=$(aux4 computer mac find "Hello from aux4/computer-mac CI" --app TextEdit)
+          echo "$TYPED"
+          if ! echo "$TYPED" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::typed text not found in TextEdit"
+            exit 1
+          fi
+
+          # Screenshot of a single window must work (regression: CGS_REQUIRE_INIT crash).
+          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/screenshots/calculator.png" | jq -e '.width > 0' > /dev/null
+
+      # Keep what the apps looked like, especially when a live check failed.
+      - name: Capture screenshots
+        if: always()
+        shell: bash
+        working-directory: package
+        run: |
+          mkdir -p "$RUNNER_TEMP/screenshots"
+          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/screenshots/calculator.png" || true
+          aux4 computer mac screenshot --app TextEdit --output "$RUNNER_TEMP/screenshots/textedit.png" || true
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-ui-screenshots
+          path: |
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/calculator-ocr.json
+            ${{ runner.temp }}/wait-*
+          if-no-files-found: warn
+
+
+  publish:
+    needs: [test-darwin, test-live]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: package/dist
+
+      - name: Restore executable bit
+        run: chmod +x package/dist/darwin/*/aux4-computer-mac
+
+      - name: Mint prod hub publish token
+        id: mint
+        if: github.ref_name == 'main'
+        env:
+          CLIENT_ID: ${{ secrets.AUX4_PUBLISHER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AUX4_PUBLISHER_CLIENT_SECRET }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then echo "::error::publisher client id/secret not set"; exit 1; fi
+          TOK=$(curl -sf -u "$CLIENT_ID:$CLIENT_SECRET" -d grant_type=client_credentials https://sso.aux4.io/token | jq -r '.access_token // empty')
+          if [ -z "$TOK" ]; then echo "::error::client_credentials mint returned no access_token"; exit 1; fi
+          echo "::add-mask::$TOK"; echo "token=$TOK" >> "$GITHUB_OUTPUT"
+
+      # The dev hub is validated by dev SSO, so a prod token is rejected there.
+      # Mint a short-lived dev publish token from the dev publisher client
+      # credentials. Only runs on the dev branch.
+      - name: Mint dev hub publish token
+        id: devmint
+        if: github.ref_name == 'dev'
+        env:
+          CLIENT_ID: ${{ secrets.AUX4_DEV_PUBLISHER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AUX4_DEV_PUBLISHER_CLIENT_SECRET }}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then echo "::error::dev publisher client id/secret not set"; exit 1; fi
+          TOK=$(curl -sf -u "$CLIENT_ID:$CLIENT_SECRET" -d grant_type=client_credentials https://dev.sso.aux4.io/token | jq -r '.access_token // empty')
+          if [ -z "$TOK" ]; then echo "::error::client_credentials mint returned no access_token from dev SSO"; exit 1; fi
+          echo "::add-mask::$TOK"; echo "token=$TOK" >> "$GITHUB_OUTPUT"
+
+      - name: Publish package
+        uses: aux4/action@v1
+        with:
+          command: publish
+          level: ${{ inputs.level || 'patch' }}
+          # dev -> minted dev token; main -> minted prod token
+          aux4_token: ${{ github.ref_name == 'dev' && steps.devmint.outputs.token || steps.mint.outputs.token }}
+          # dev -> dev hub registry; main -> default (prod) hub
+          registry: ${{ github.ref_name == 'dev' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,24 +1,38 @@
 #### Description
 
-Types text at the current keyboard focus, unicode-safe (emoji and non-ASCII included). Requires the
-Accessibility permission. Use `--delay` to wait before typing — useful right after opening a panel (e.g.
-Spotlight) that needs a moment to receive focus.
+Types text, unicode-safe (emoji and non-ASCII included), into the focused element of the target app
+(`--app`, or the frontmost app). Requires the Accessibility permission.
+
+By default (`--mode auto`) typing happens **in the background**: the text is inserted at the app's text
+cursor (replacing any selection, exactly like typing) through Accessibility, so the target app doesn't
+need to be in front and nothing on screen moves. If the focused element doesn't accept that and the app is
+already frontmost, the text is sent as keystrokes to that app only. Otherwise `auto` falls back to real
+keystrokes: the app is brought forward, the text typed, and the previously frontmost app restored.
+`--mode background` errors instead of falling back; `--mode foreground` always types real keystrokes at
+the current focus.
+
+The output's `mode` says which happened, and `method` how (`accessibility` or `postToPid`).
+
+Use `--delay` to wait before typing — useful right after opening a panel (e.g. Spotlight) that needs a
+moment to receive focus.
 
 #### Usage
 
 ```bash
-aux4 computer mac type <text> [--delay <ms>]
+aux4 computer mac type <text> [--app <name>] [--delay <ms>] [--mode auto|background|foreground]
 ```
 
 text      Text to type (positional)
+--app     App to type into (default: the frontmost app)
 --delay   Milliseconds to wait before typing (default: `0`)
+--mode    `auto`, `background` or `foreground` (default: `auto`)
 
 #### Example
 
 ```bash
-aux4 computer mac type "Hello, world!" --delay 300
+aux4 computer mac type "Hello, world!" --app TextEdit
 ```
 
 ```json
-{"typed":13}
+{"app":"TextEdit","method":"accessibility","mode":"background","typed":13}
 ```

@@ -1,9 +1,13 @@
 # aux4/computer-mac
 
 Computer-use for AI agents on macOS. A native Swift CLI (no Python/Node/cliclick dependency) that lets an
-agent see the screen and act on it: take screenshots, read the accessibility tree, find and click UI
+agent see the screen and act on it: take screenshots, read the text on screen (OCR), wait for something to appear, read the accessibility tree, find and click UI
 elements, type text, press keyboard shortcuts, scroll, drag, control the clipboard, and manage apps and
-windows. All commands print JSON to stdout. Coordinates are in screen points.
+windows. All commands print JSON to stdout.
+
+It is built to **work alongside the person using the Mac**: actions run in the background by default —
+on an app that isn't in front, without moving the mouse cursor or changing the frontmost app — and fall
+back to real input only when the background isn't possible.
 
 This package is **darwin-only** (macOS). It ships native binaries for `darwin/arm64` and `darwin/amd64`.
 
@@ -30,10 +34,56 @@ aux4 computer mac permissions
 
 - **Accessibility** is required for `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`
   and `focus`.
-- **Screen Recording** is required for `screenshot`.
+- **Screen Recording** is required for `screenshot` and `ocr` (except `ocr --image`).
 
 Every command that needs a permission that isn't granted returns a clear JSON error with the exact System
 Settings pane to open — never a silent no-op.
+
+## Background mode (default)
+
+Every action takes `--mode`:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Act in the background; if that isn't possible, fall back to real input, then restore the cursor position and the previously frontmost app |
+| `background` | Act in the background only; error instead of falling back |
+| `foreground` | Always use real mouse/keyboard input |
+
+Every action's JSON says what happened: `"mode":"background"` or `"mode":"foreground"`, plus a
+`fallbackReason` (and what was `restored`) when `auto` fell back.
+
+Pass `--app <name>` to target an app that isn't in front; without it, the frontmost app is the target.
+
+| Command | In the background | Falls back to real input when |
+|---------|-------------------|-------------------------------|
+| `click --x --y` / `--element` | Presses the app's accessibility element at that point (even if its window is covered); a text field/area gets the focus | Nothing pressable at the point; `--count 2` (double-click) |
+| `type` | Inserts the text at the app's text cursor via Accessibility | The focused element doesn't accept text that way |
+| `clipboard copy` | Reads the app's selected text and puts it on the clipboard | The app doesn't expose its selection or an enabled Copy menu item |
+| `clipboard paste` | Inserts the clipboard text at the app's text cursor | The focused element doesn't accept text that way |
+| `shortcut --app` | Presses the app's enabled menu item for that shortcut, or sends the keys to the app if it's already in front | No enabled menu item — e.g. `cmd+a`/`cmd+z` in a background app |
+| `scroll` | Moves the scroll area's scroll bar via Accessibility (or posts the scroll to the app with `--app`) | No scroll area at the point and no `--app` |
+| `open` | Launches without activating; leaves an already-running app as it is | — |
+| `screenshot --app` | Captures the app's window even when covered | — |
+| `ocr --app` | Reads the text in the app's window even when covered | The window isn't on screen (app hidden, window on another Space) |
+
+**Always foreground:** `focus`, `move`, `drag`, and `shortcut` without `--app` (a system-wide hotkey such
+as `cmd+space`).
+
+### Coordinates
+
+With `--app`, `--x`/`--y` are **relative to that app's front window** — the same space as a
+`screenshot --app` image (divide image pixels by its `scale`) and `find --app`'s `windowCenter`. The
+screenshot output includes the window's `frame` in screen points, and `ocr --app` reports a `windowCenter`
+for every line of text it reads. Without `--app`, coordinates are screen points.
+
+```bash
+aux4 computer mac screenshot --app Calculator --output /tmp/calc.png
+aux4 computer mac click --app Calculator --x 34 --y 211
+```
+
+```json
+{"action":"AXPress","app":"Calculator","button":"left","count":1,"element":{"label":"7","role":"AXButton"},"mode":"background","screen":{"x":496,"y":610},"x":34,"y":211}
+```
 
 ## Commands
 
@@ -46,9 +96,84 @@ aux4 computer mac cursor
 ```
 
 `screenshot` captures a display (via `--display`, index from `computer mac screen`) or a specific app's
-frontmost window (via `--app`). The image is resized down to `--maxWidth` (default `1568`, a sane upper
+front window (via `--app`), even when it's covered by other windows. The image is resized down to `--maxWidth` (default `1568`, a sane upper
 bound for vision models) preserving aspect ratio, and saved as PNG to `--output` (or a temp file if
 omitted).
+
+### Three ways to look at an app
+
+| Command | What it asks | Good for |
+|---------|--------------|----------|
+| `read` / `find` | The app itself, through Accessibility: the elements it exposes, with roles, labels, values and frames | Exact labels and values, clicking by `ref`; fast and precise when the app exposes its UI |
+| `screenshot` | The pixels: an image of the screen or a window | Giving a vision model the full picture: layout, icons, colors, anything drawn |
+| `ocr` | The pixels, read as text: each line with its position in click coordinates | Text the accessibility tree doesn't expose (canvas UIs, images, remote desktops), and checking what is actually shown |
+
+All three work on a covered window with `--app`, and their positions line up: a `find --app` match's
+`windowCenter`, an `ocr --app` match's `windowCenter`, and a point in a `screenshot --app` image (divided by
+its `scale`) can all be passed to `click --app --x --y`.
+
+### Reading text from pixels
+
+```bash
+aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [--level accurate|fast] [--languages en-US,pt-BR] [--timeout 60s]
+```
+
+`ocr` recognizes text on this Mac (no network, nothing to download) in the main display, in an app's
+front window (`--app`, even when covered), or in an existing PNG (`--image`, no Screen Recording needed).
+Each line of text is an entry in `matches` (the same key as `find`) with `text`, `confidence` (`0`–`1`),
+a `frame` and a `center` in screen points, plus a `windowCenter` with `--app`. `--text` keeps only the
+lines containing that text (ignoring case, whitespace and commas, so `1792` matches `1,792`; no match is an empty `matches` array,
+not an error) and adds a `match` with the position of just that text.
+
+```bash
+aux4 computer mac ocr --app Calculator --text "1,792"
+```
+
+```json
+{"app":"Calculator","height":408,"level":"accurate","matches":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
+```
+
+**Note:** very small or low-contrast text can be missed or misread, and `--level fast` is much weaker
+than the default `accurate` (on light-on-dark UIs it may find nothing). Check `confidence`, and prefer
+`find` when the app exposes the element.
+
+`ocr` never runs past `--timeout` (default `60s`): it exits `1` with a JSON error on stderr, e.g.
+`{"error":"Text recognition did not finish within 60s","phase":"recognition",...}`, and puts back the
+frontmost app if it had brought one forward. A screen capture that doesn't respond within 10s fails
+with `{"error":"Screen capture did not respond within 10s","phase":"capture"}`.
+
+**Note:** on a Mac with a Neural Engine, the first recognition after installing or updating the package
+takes about 30s while macOS prepares its text models; after that each call takes a fraction of a
+second. It takes longer while macOS's Neural Engine compiler is busy with other requests. If a call
+times out during that preparation, the error says so (`note`), and the preparation finishes in the
+background (`"warmup":true`) so the next call is fast.
+
+### Waiting for something to appear
+
+```bash
+aux4 computer mac wait [--text "1792"] [--role AXButton] [--app "Calculator"] [--gone true] [--source auto|ax|ocr] [--timeout 10s] [--interval 500ms]
+```
+
+`wait` blocks until text or an element appears — checking the app's accessibility tree first, then
+its window's pixels with OCR when the tree has no match — or, with `--app` alone, until the app has an
+on-screen window. `--gone true` waits until it's no longer there. It returns as soon as the condition
+holds, with how long it `waited`, the `source` that saw it (`ax`, `ocr` or `app`) and the same `matches`
+as `find`/`ocr`/`windows`, ready for `click`. Text matching ignores case, whitespace and commas, so
+`1792` matches `1,792`.
+
+```bash
+aux4 computer mac wait --app Calculator --text 1792
+```
+
+```json
+{"app":"Calculator","matches":[{"center":{"x":645,"y":511},"label":"Edit field","ref":"0.0.0.0.1.0.0.0.0.0","role":"AXStaticText","value":"1,792","windowCenter":{"x":183,"y":112}}],"source":"ax","waited":1.7}
+```
+
+On timeout (`--timeout` takes `500ms`, `10s`, `2m`; default `10s`) it exits `1` with a JSON error on stderr
+naming the condition and what it saw on the last check (the first texts from accessibility and OCR,
+and whether the app was running with a window), so an agent can tell a wrong guess from a slow app.
+It always stops at `--timeout`, even when an app stops answering or a screen capture stalls. `wait`
+only reads: it never moves the cursor or brings an app forward.
 
 ### Reading the UI
 
@@ -59,49 +184,50 @@ aux4 computer mac find "Save" [--role AXButton] [--app "TextEdit"]
 
 `read` walks the accessibility tree of the frontmost app (or `--app`) and returns a flat list of elements
 with a `ref`, `role`, `label`, `value`, `frame` and `enabled`/`focused` state. `find` filters that same
-tree by text and/or role and includes a `center` point for each match. A `ref` is only valid against the
+tree by text and/or role and includes a `center` point (screen points) for each match, plus a
+`windowCenter` (relative to the app's window) with `--app`. A `ref` is only valid against the
 current state of that app — read/find again if the UI has changed.
 
 ### Acting on the UI
 
 ```bash
-aux4 computer mac click [--x 100 --y 200] [--button left|right] [--count 2]
+aux4 computer mac click --x 100 --y 200 [--app "Calculator"] [--button left|right] [--count 2] [--mode auto]
 aux4 computer mac click --element 0.2.1 [--app "TextEdit"]
+aux4 computer mac scroll [--x 100 --y 200] --dy=-200 [--app "TextEdit"]
 aux4 computer mac move --x 100 --y 200
 aux4 computer mac drag --x 100 --y 200 --toX 400 --toY 200
-aux4 computer mac scroll [--x 100 --y 200] --dx 0 --dy -200
 ```
 
-Clicking by `--element` (a `ref` from `read`/`find`) performs an accessibility press action directly on
-that element, which is more reliable than simulating a coordinate click. Clicking by `--x`/`--y` posts a
-real mouse event at that location.
+Clicking by `--element` (a `ref` from `read`/`find`) presses that element directly. Clicking by
+`--x`/`--y` presses whatever element is at that point, in the background; see the table above for when it
+falls back to a real mouse click. Pass negative scroll deltas with `=` (`--dy=-200`).
 
 ### Keyboard
 
 ```bash
-aux4 computer mac type "Hello, world!" [--delay 300]
+aux4 computer mac type "Hello, world!" [--app "TextEdit"] [--delay 300]
+aux4 computer mac shortcut "cmd+1" --app "Calculator"
 aux4 computer mac shortcut "cmd+shift+4"
-aux4 computer mac shortcut "cmd+a"
 aux4 computer mac shortcut "enter"
 ```
 
-`type` sends unicode-safe keystrokes for arbitrary text. `shortcut` parses a combo like `cmd+shift+4` —
+`type` inserts unicode-safe text (emoji and non-ASCII included) into the app's focused element. `shortcut` parses a combo like `cmd+shift+4` —
 modifiers (`cmd`/`command`, `shift`, `alt`/`option`, `ctrl`/`control`, `fn`) plus one key — and posts it as
-a real key event. Both accept an optional `--delay` (milliseconds) to wait before acting, useful right
+a real key event — or, with `--app`, runs it in that app in the background when it can. Both accept an optional `--delay` (milliseconds) to wait before acting, useful right
 after opening a panel like Spotlight.
 
 ### Clipboard
 
 ```bash
-aux4 computer mac clipboard copy [--text "..."]
-aux4 computer mac clipboard paste [--text "..."]
+aux4 computer mac clipboard copy [--text "..."] [--app "TextEdit"]
+aux4 computer mac clipboard paste [--text "..."] [--app "TextEdit"]
 aux4 computer mac clipboard read
 ```
 
-- `copy` — with `--text`, writes that text to the clipboard directly; without, presses `cmd+c` to copy
-  the current selection and returns what was actually copied.
-- `paste` — with `--text`, writes that text to the clipboard first, then presses `cmd+v` to paste it into
-  the focused app; without, pastes whatever is already on the clipboard.
+- `copy` — with `--text`, writes that text to the clipboard directly; without, copies the app's current
+  selection (in the background when possible) and returns what was actually copied.
+- `paste` — with `--text`, writes that text to the clipboard first, then pastes it into the app's focused
+  element (in the background when possible); without, pastes whatever is already on the clipboard.
 - `read` — returns the current clipboard text with no side effects.
 
 Text only, for now.
@@ -115,7 +241,20 @@ aux4 computer mac open "TextEdit"
 aux4 computer mac focus "TextEdit"
 ```
 
-### Example: open Spotlight, launch an app, type and paste
+`open` launches an app without bringing it to the front (`--mode foreground` to bring it forward);
+`focus` always brings it to the front.
+
+### Example: work in TextEdit without interrupting the user
+
+```bash
+aux4 computer mac open "TextEdit"
+aux4 computer mac type "hello from an agent" --app "TextEdit"
+aux4 computer mac clipboard paste --text " and a pasted line" --app "TextEdit"
+aux4 computer mac screenshot --app "TextEdit"
+aux4 computer mac ocr --app "TextEdit" --text "hello from an agent"
+```
+
+### Example: open Spotlight, launch an app, type and paste (foreground)
 
 ```bash
 aux4 computer mac shortcut "cmd+space"
@@ -133,3 +272,19 @@ aux4 computer mac clipboard paste --text "replaced via agent"
 Every command prints a single JSON object to stdout. On failure (bad arguments, missing permission,
 element not found, app not running) it prints `{"error": "..."}` and exits non-zero — agents should check
 the exit code or the presence of an `error` key rather than parsing stdout as always-successful.
+
+## Troubleshooting
+
+### `ocr` (or OCR in `wait`) is slow or times out
+
+On a Mac with a Neural Engine, macOS prepares its text-recognition model the first time a new install
+of this package recognizes text (also after a macOS update or restart): that first call takes about
+30s, then every call takes a fraction of a second. `ocr`'s default `--timeout` of `60s` covers it.
+With a short deadline (for example `wait --timeout 5s`), OCR may not contribute on that first cold
+call; the accessibility tree is still checked, and the error's `note`/`notes` says the model was still
+being prepared. The preparation then finishes in the background (`"warmup":true`), so retry shortly.
+
+If **every** call takes ~30s or longer, macOS's Neural Engine compiler is stuck or backed up: check
+whether `ANECompilerService` sits at ~100% CPU (Activity Monitor or `ps -axo pcpu,comm | grep ANECompiler`),
+stop any leftover `aux4-computer-mac` processes, and run `sudo killall ANECompilerService` (or restart
+the Mac). Recognition is back to ~0.1–0.3s afterwards.

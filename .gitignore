@@ -1,1 +1,5 @@
 .DS_Store
+package/aux4-computer-mac
+package/*.zip
+package/dist/
+package/*.zip

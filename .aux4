@@ -29,6 +29,7 @@
         {
           "name": "darwin",
           "execute": [
+            "mkdir -p package/dist/darwin/arm64 package/dist/darwin/amd64",
             "swiftc -O -target arm64-apple-macosx14.0 -o package/dist/darwin/arm64/aux4-computer-mac main.swift",
             "swiftc -O -target x86_64-apple-macosx14.0 -o package/dist/darwin/amd64/aux4-computer-mac main.swift"
           ],

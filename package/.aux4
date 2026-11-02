@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "computer-mac",
-  "version": "0.1.0",
+  "version": "0.4.4",
   "description": "Computer-use for AI agents on macOS: screenshot, read the accessibility tree, click, type, keyboard shortcuts, scroll, drag, clipboard and app/window control",
   "license": "Apache-2.0",
   "tags": [
@@ -73,13 +73,129 @@
               },
               {
                 "name": "app",
-                "text": "Capture this app's frontmost window instead of a display",
+                "text": "Capture this app's front window (even when covered by other windows) instead of a display",
                 "default": ""
               },
               {
                 "name": "maxWidth",
                 "text": "Resize down if wider than this, preserving aspect ratio",
                 "default": "1568"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ocr",
+          "execute": [
+            "${packageDir}/aux4-computer-mac ocr values(app, image, text, level, languages, mode, scale, timeout)"
+          ],
+          "help": {
+            "text": "Recognize text on the screen, an app's window or a PNG, with positions in click coordinates",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Read this app's front window (even when covered by other windows); positions are also given relative to it as windowCenter, the space 'click --app' uses",
+                "default": ""
+              },
+              {
+                "name": "image",
+                "text": "Recognize an existing PNG instead of capturing the screen (no Screen Recording permission needed)",
+                "default": ""
+              },
+              {
+                "name": "text",
+                "text": "Only return lines containing this text (case-insensitive); each line also gets a 'match' with the position of just that text",
+                "default": ""
+              },
+              {
+                "name": "level",
+                "text": "accurate (default) or fast recognition",
+                "default": "accurate",
+                "options": [
+                  "accurate",
+                  "fast"
+                ]
+              },
+              {
+                "name": "languages",
+                "text": "Comma-separated recognition languages in priority order, e.g. en-US,pt-BR (default: the system's default)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): capture in the background, bringing the app to the front only if its window isn't on screen; background: never bring it forward (error instead); foreground: bring the app to the front for the capture, then restore",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              },
+              {
+                "name": "scale",
+                "text": "With --image: image pixels per point (the 'scale' from 'screenshot'), so positions come out in points",
+                "default": "1"
+              },
+              {
+                "name": "timeout",
+                "text": "Give up with a JSON error after this long, e.g. 30s, 2m (default 60s: the first recognition after installing or updating takes about 30s)",
+                "default": "60s"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wait",
+          "execute": [
+            "${packageDir}/aux4-computer-mac wait values(text, role, app, gone, source, timeout, interval)"
+          ],
+          "help": {
+            "text": "Wait until text, an element or an app window appears (or is gone), checking the accessibility tree first, then OCR",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to wait for in element labels/values or on the pixels (ignores case, whitespace and commas, so 1792 matches 1,792)",
+                "default": "",
+                "arg": true
+              },
+              {
+                "name": "role",
+                "text": "Only elements with this AX role, e.g. AXButton (accessibility only)",
+                "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App to watch (defaults to the frontmost app / the whole screen); alone, wait until it is running with an on-screen window",
+                "default": ""
+              },
+              {
+                "name": "gone",
+                "text": "true: wait until the text, element or app window is no longer there",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
+                ]
+              },
+              {
+                "name": "source",
+                "text": "auto (default): accessibility first, OCR of the app window (or screen) when accessibility has no match; ax or ocr: only that one",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "ax",
+                  "ocr"
+                ]
+              },
+              {
+                "name": "timeout",
+                "text": "How long to wait before failing, e.g. 500ms, 10s, 2m",
+                "default": "10s"
+              },
+              {
+                "name": "interval",
+                "text": "Pause between checks, e.g. 250ms, 1s (checks never overlap)",
+                "default": "500ms"
               }
             ]
           }
@@ -135,19 +251,19 @@
         {
           "name": "click",
           "execute": [
-            "${packageDir}/aux4-computer-mac click values(x, y, button, count, element, app)"
+            "${packageDir}/aux4-computer-mac click values(x, y, button, count, element, app, mode)"
           ],
           "help": {
-            "text": "Click at coordinates or press an accessibility element by ref",
+            "text": "Click at coordinates or press an element; in the background by default",
             "variables": [
               {
                 "name": "x",
-                "text": "X coordinate in screen points",
+                "text": "X coordinate: relative to the app's window with --app (same as 'screenshot --app'), screen points without",
                 "default": ""
               },
               {
                 "name": "y",
-                "text": "Y coordinate in screen points",
+                "text": "Y coordinate: relative to the app's window with --app (same as 'screenshot --app'), screen points without",
                 "default": ""
               },
               {
@@ -167,8 +283,18 @@
               },
               {
                 "name": "app",
-                "text": "App the element ref belongs to (required with --element if not frontmost)",
+                "text": "Target app; x/y become relative to its window (default: the frontmost app, screen points)",
                 "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -179,7 +305,7 @@
             "${packageDir}/aux4-computer-mac move values(x, y)"
           ],
           "help": {
-            "text": "Move the mouse cursor to screen coordinates",
+            "text": "Move the mouse cursor to screen coordinates (always real foreground)",
             "variables": [
               {
                 "name": "x",
@@ -198,7 +324,7 @@
             "${packageDir}/aux4-computer-mac drag values(x, y, toX, toY)"
           ],
           "help": {
-            "text": "Drag the mouse from one point to another",
+            "text": "Drag the mouse from one point to another (always real foreground)",
             "variables": [
               {
                 "name": "x",
@@ -222,10 +348,10 @@
         {
           "name": "type",
           "execute": [
-            "${packageDir}/aux4-computer-mac type values(text, delay)"
+            "${packageDir}/aux4-computer-mac type values(text, delay, app, mode)"
           ],
           "help": {
-            "text": "Type unicode-safe text at the current focus",
+            "text": "Type unicode-safe text into the focused element of an app; in the background by default",
             "variables": [
               {
                 "name": "text",
@@ -236,6 +362,21 @@
                 "name": "delay",
                 "text": "Milliseconds to wait before typing (e.g. for a panel to appear)",
                 "default": "0"
+              },
+              {
+                "name": "app",
+                "text": "App to type into (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -243,7 +384,7 @@
         {
           "name": "shortcut",
           "execute": [
-            "${packageDir}/aux4-computer-mac shortcut values(keys, delay)"
+            "${packageDir}/aux4-computer-mac shortcut values(keys, delay, app, mode)"
           ],
           "help": {
             "text": "Press a keyboard shortcut, e.g. cmd+shift+4",
@@ -257,6 +398,21 @@
                 "name": "delay",
                 "text": "Milliseconds to wait before pressing",
                 "default": "0"
+              },
+              {
+                "name": "app",
+                "text": "Send the shortcut to this app (background when possible); without it the shortcut is system-wide (real input)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -264,19 +420,19 @@
         {
           "name": "scroll",
           "execute": [
-            "${packageDir}/aux4-computer-mac scroll values(x, y, dx, dy)"
+            "${packageDir}/aux4-computer-mac scroll values(x, y, dx, dy, app, mode)"
           ],
           "help": {
-            "text": "Scroll at the given position (or current cursor position)",
+            "text": "Scroll at a position in an app; in the background by default",
             "variables": [
               {
                 "name": "x",
-                "text": "X coordinate to move the cursor to before scrolling",
+                "text": "X coordinate to scroll at: relative to the app's window with --app, screen points without",
                 "default": ""
               },
               {
                 "name": "y",
-                "text": "Y coordinate to move the cursor to before scrolling",
+                "text": "Y coordinate to scroll at: relative to the app's window with --app, screen points without",
                 "default": ""
               },
               {
@@ -288,6 +444,21 @@
                 "name": "dy",
                 "text": "Vertical scroll delta in pixels",
                 "default": "0"
+              },
+              {
+                "name": "app",
+                "text": "App to scroll (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -331,15 +502,25 @@
         {
           "name": "open",
           "execute": [
-            "${packageDir}/aux4-computer-mac open values(app)"
+            "${packageDir}/aux4-computer-mac open values(app, mode)"
           ],
           "help": {
-            "text": "Open/launch an application by name",
+            "text": "Open/launch an application by name without bringing it to the front (by default)",
             "variables": [
               {
                 "name": "app",
                 "text": "Application name",
                 "arg": true
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -350,7 +531,7 @@
             "${packageDir}/aux4-computer-mac focus values(app)"
           ],
           "help": {
-            "text": "Bring a running application to the foreground",
+            "text": "Bring a running application to the foreground (always real foreground)",
             "variables": [
               {
                 "name": "app",
@@ -377,15 +558,30 @@
         {
           "name": "copy",
           "execute": [
-            "${packageDir}/aux4-computer-mac clipboard-copy values(text)"
+            "${packageDir}/aux4-computer-mac clipboard-copy values(text, app, mode)"
           ],
           "help": {
-            "text": "Copy to the clipboard: with --text, write it directly; without, press cmd+c and return what was copied",
+            "text": "Copy to the clipboard: with --text, write it directly; without, copy the app's current selection (background by default) and return it",
             "variables": [
               {
                 "name": "text",
                 "text": "Text to put on the clipboard; omit to copy the current selection (cmd+c)",
                 "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App whose selection to copy (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
@@ -393,15 +589,30 @@
         {
           "name": "paste",
           "execute": [
-            "${packageDir}/aux4-computer-mac clipboard-paste values(text)"
+            "${packageDir}/aux4-computer-mac clipboard-paste values(text, app, mode)"
           ],
           "help": {
-            "text": "Paste the clipboard into the focused app (cmd+v); with --text, write it to the clipboard first",
+            "text": "Paste the clipboard into the focused element of an app (background by default); with --text, write it to the clipboard first",
             "variables": [
               {
                 "name": "text",
                 "text": "Text to put on the clipboard before pasting; omit to paste the current clipboard contents",
                 "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App to paste into (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
               }
             ]
           }
