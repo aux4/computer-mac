@@ -12,13 +12,22 @@ let keyNameForCode: [Int: String] = {
     return m
 }()
 
+// Key equivalents some apps report as glyphs rather than characters.
+let menuGlyphKeys: [String: String] = [
+    "\u{238B}": "escape", "\u{1B}": "escape", "\u{232B}": "delete", "\u{8}": "delete", "\u{7F}": "delete",
+    "\u{2326}": "forwarddelete", "\u{21A9}": "return", "\r": "return", "\u{3}": "enter", "\u{2324}": "enter",
+    "\u{21E5}": "tab", "\t": "tab", "\u{2190}": "left", "\u{2192}": "right", "\u{2191}": "up", "\u{2193}": "down",
+    "\u{F702}": "left", "\u{F703}": "right", "\u{F700}": "up", "\u{F701}": "down", "\u{2196}": "home",
+    "\u{2198}": "end", "\u{21DE}": "pageup", "\u{21DF}": "pagedown"
+]
+
 // menuShortcut renders an item's key equivalent as a 'shortcut --keys' combo (cmd+shift+s).
 func menuShortcut(_ item: AXUIElement) -> String? {
     let mods = axNumber(item, kAXMenuItemCmdModifiersAttribute) ?? 0
     var key: String? = nil
     if let ch = axString(item, kAXMenuItemCmdCharAttribute), !ch.isEmpty {
         let lower = ch.lowercased()
-        key = menuCharForKey.first(where: { $0.value == lower })?.key ?? lower
+        key = menuGlyphKeys[ch] ?? menuCharForKey.first(where: { $0.value == lower })?.key ?? lower
     } else if let vk = axNumber(item, kAXMenuItemCmdVirtualKeyAttribute), vk > 0 {
         // Keys without a character (arrows, F-keys, delete). 0 would be "a", which always has a char.
         key = keyNameForCode[vk]

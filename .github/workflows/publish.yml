@@ -268,10 +268,19 @@ jobs:
 
           # menu: list, then toggle Calculator's view through its menu items in the background.
           cm menu --app Calculator | check menu-calculator '[.menus[].title] | index("View") != null'
+          # The pressed item must take effect: Scientific has many more keys than Basic.
+          BASIC_KEYS=$(cm find "" --role AXButton --app Calculator | jq '.matches | length')
           cm menu --app Calculator --path "View > Scientific" --mode background | check menu-scientific '.mode == "background" and .pressed == "Scientific"'
-          sleep 0.5
-          cm menu --app Calculator | check menu-checked '[.menus[] | select(.title == "View") | .children[] | select(.title == "Scientific")][0].checked == true'
+          sleep 1
+          SCI_KEYS=$(cm find "" --role AXButton --app Calculator | jq '.matches | length')
+          echo "Calculator keys: basic $BASIC_KEYS, scientific $SCI_KEYS"
+          if [ "$SCI_KEYS" -le "$BASIC_KEYS" ]; then echo "::error::View > Scientific did not switch Calculator to scientific"; exit 1; fi
+          # Some macOS versions only refresh check marks when the menu opens: report, don't gate.
+          cm menu --app Calculator | jq -e '[.menus[] | select(.title == "View") | .children[] | select(.title == "Scientific")][0].checked == true' > /dev/null \
+            || echo "::warning::View > Scientific shows no check mark through Accessibility on this macOS"
           cm menu --app Calculator --path "view > basic" --mode background | check menu-basic '.mode == "background" and .path == ["View", "Basic"]'
+          sleep 1
+          [ "$(cm find "" --role AXButton --app Calculator | jq '.matches | length')" -eq "$BASIC_KEYS" ] || { echo "::error::View > Basic did not switch Calculator back"; exit 1; }
           if cm menu --app Calculator --path "View > No Such Item" 2> "$T/menu-missing.err"; then echo "::error::menu accepted a missing item"; exit 1; fi
           grep -q "Available: " "$T/menu-missing.err"
 
