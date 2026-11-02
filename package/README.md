@@ -339,6 +339,9 @@ without activating it and waits for it to exit; an app with unsaved changes may 
 kills it (unsaved changes are lost); force-quitting Finder and quitting the Dock, loginwindow and other session
 processes are refused.
 
+**Note:** text written through Accessibility (`set --value`, or `type` in the background) doesn't mark a document as
+edited, so closing or quitting may discard it without asking. Save first when it matters.
+
 Wherever `--app` is accepted, the app can be given by name or by bundle id (`com.apple.TextEdit`).
 
 ## Action log and stop switch

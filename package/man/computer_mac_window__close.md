@@ -7,6 +7,9 @@ When the app asks first (an unsaved document shows a "save changes?" sheet), `cl
 includes the `dialog` (kind, text, buttons, fields, as `dialog` reports it) and a `note`; answer it with
 `dialog --app <name> --press <button>`. A document that was saved to a file closes without asking (macOS saves it).
 
+**Note:** text written through Accessibility (`set --value`, or `type` in the background) doesn't mark the document as
+edited, so the app may close it without asking and the text is lost. Save first when it matters.
+
 #### Usage
 
 ```bash

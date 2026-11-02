@@ -6,6 +6,8 @@ Quits an app the way the Quit menu item does (`terminate`), without bringing it 
 - An app with unsaved changes may answer with a "save changes?" sheet or alert instead of quitting: the result then
   has `terminated: false`, the `dialog` and a `note`. Answer it with `dialog --app <name> --press <button>` (the app
   quits after "Delete"/"Don't Save"), or press "Cancel" to keep it running.
+- A sheet or alert that is already open keeps the app from quitting: it is reported the same way; answer it, then
+  run `quit` again.
 - `--force true` kills the app (`forceTerminate`): unsaved changes are lost. Force-quitting Finder is refused.
 - Session processes (Dock, loginwindow, SystemUIServer, Control Center, Notification Center, Spotlight, Window
   Manager) are never quit.
