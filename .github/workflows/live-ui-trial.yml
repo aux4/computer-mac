@@ -40,15 +40,16 @@ jobs:
         shell: bash
         run: aux4 builder darwin
 
-      - name: Install package locally
+      # Run from package/ so aux4 loads the package's own .aux4 (no install
+      # needed); ${packageDir} then resolves to package/, where the binary is linked.
+      - name: Link binary
         shell: bash
-        run: |
-          aux4 aux4 pkger install aux4/package-releaser
-          aux4 aux4 releaser install --dir package --noBuild true
+        run: ln -sf dist/darwin/arm64/aux4-computer-mac package/aux4-computer-mac
 
       - name: Check permissions
         id: perms
         shell: bash
+        working-directory: package
         run: |
           aux4 computer mac permissions | tee perms.json
           ACCESSIBILITY=$(jq -r '.accessibility.granted' perms.json)
@@ -57,6 +58,7 @@ jobs:
       - name: Live UI trial (Calculator + TextEdit)
         if: steps.perms.outputs.accessibility == 'true'
         shell: bash
+        working-directory: package
         run: |
           set -euo pipefail
 
