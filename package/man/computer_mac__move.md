@@ -1,6 +1,7 @@
 #### Description
 
-Moves the mouse cursor to the given screen point without clicking. Requires the Accessibility permission.
+Moves the mouse cursor to the given screen point without clicking. This always moves the real cursor —
+the output says `"mode":"foreground"`. Requires the Accessibility permission.
 
 #### Usage
 
@@ -18,5 +19,5 @@ aux4 computer mac move --x 500 --y 300
 ```
 
 ```json
-{"x":500,"y":300}
+{"mode":"foreground","x":500,"y":300}
 ```

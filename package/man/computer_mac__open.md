@@ -1,15 +1,19 @@
 #### Description
 
-Launches an application by name, via `/usr/bin/open -a`. If the app isn't already running, macOS starts
-it; if it's running, this typically brings it forward. Does not require any special permission.
+Opens an application by name. By default (`--mode auto`) it happens **in the background**: an app that
+isn't running is launched without being brought to the front; an app that is already running is left as
+it is (`"alreadyRunning":true`). If a launching app activates itself anyway, the previously frontmost app
+is put back. `--mode foreground` opens it the regular way, bringing it to the front. Does not require any
+special permission.
 
 #### Usage
 
 ```bash
-aux4 computer mac open <app>
+aux4 computer mac open <app> [--mode auto|background|foreground]
 ```
 
-app   Application name (positional)
+app      Application name (positional)
+--mode   `auto`, `background` or `foreground` (default: `auto`)
 
 #### Example
 
@@ -18,5 +22,5 @@ aux4 computer mac open "TextEdit"
 ```
 
 ```json
-{"opened":"TextEdit"}
+{"mode":"background","opened":"TextEdit"}
 ```

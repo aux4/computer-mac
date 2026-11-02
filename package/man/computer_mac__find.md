@@ -3,7 +3,9 @@
 Searches the accessibility tree of the frontmost app (or `--app`) for elements whose label or value
 contains `--text` (case-insensitive) and/or whose role equals `--role`. At least one of `text` or `role`
 must be given. Each match includes everything `read` returns plus a `center` point (`{x, y}`), ready to
-pass straight into `computer mac click --x --y`. Requires the Accessibility permission.
+pass straight into `computer mac click --x --y` (screen points). With `--app`, each match also has a
+`windowCenter` — the same point relative to the app's front window, ready for `click --app --x --y`.
+Requires the Accessibility permission.
 
 #### Usage
 

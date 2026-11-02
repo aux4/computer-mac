@@ -1,5 +1,15 @@
 # aux4 computer mac clipboard copy
 
+Saves and restores the clipboard so running the tests doesn't overwrite what the user copied.
+
+```beforeAll
+pbpaste > .clipboard-copy.bak
+```
+
+```afterAll
+pbcopy < .clipboard-copy.bak && rm -f .clipboard-copy.bak
+```
+
 ## with --text
 
 ### should write directly to the clipboard without needing accessibility
