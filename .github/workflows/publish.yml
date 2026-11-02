@@ -323,10 +323,10 @@ jobs:
             jq -e '.dialog != null' "$T/dialog.json" > /dev/null && break
             sleep 0.2
           done
-          check dialog-open '.dialog.kind == "sheet" or .dialog.kind == "save-panel"' < "$T/dialog.json"
+          check dialog-open '(.dialog.kind == "sheet" or .dialog.kind == "save-panel") and (.dialog.text | length > 0)' < "$T/dialog.json"
           BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' "$T/dialog.json")
           if [ -z "$BUTTON" ]; then echo "::error::no Delete/Don't Save button: $(jq -c '[.dialog.buttons[].title]' "$T/dialog.json")"; exit 1; fi
-          cm dialog --app TextEdit --press "$BUTTON" --mode background | check dialog-press '.closed == true and .mode == "background"'
+          cm dialog --app TextEdit --press "$BUTTON" --mode background | check dialog-press ".closed == true and .mode == \"background\" and .pressed == \"$BUTTON\""
           cm dialog --app TextEdit | check dialog-gone '.dialog == null'
 
           # open --file in an app given by bundle id, waiting for the file's window.

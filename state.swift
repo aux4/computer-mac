@@ -42,7 +42,11 @@ func dialogKind(_ container: AXUIElement, base: String) -> String {
     let hasNameField = !descendants(container, maxDepth: 6) { el, role in
         role == "AXTextField" && ["save as:", "save as"].contains(normalizeTitle(axString(el, kAXDescriptionAttribute) ?? axString(el, kAXTitleAttribute) ?? ""))
     }.isEmpty
-    if hasNameField || (buttons.contains("save") && hasBrowser) { return "save-panel" }
+    // A "Save As:" label next to the name field (NSSavePanel, also inside "keep this document?" sheets).
+    let hasSaveAsLabel = !descendants(container, maxDepth: 6, { el, role in
+        role == "AXStaticText" && normalizeTitle(axString(el, kAXValueAttribute) ?? "") == "save as:"
+    }).isEmpty
+    if hasNameField || hasSaveAsLabel || (buttons.contains("save") && hasBrowser) { return "save-panel" }
     if buttons.contains("open") && hasBrowser { return "open-panel" }
     return base
 }
@@ -173,12 +177,14 @@ func cmdDialog(_ args: [String]) {
             let titles = buttons.map(buttonTitle).filter { !$0.isEmpty }
             fail("No button '\(pressArg)' in the \(current.kind). Buttons: \(titles.joined(separator: ", "))")
         }
+        // The button is gone once the dialog closes: keep its title.
+        let title = buttonTitle(button)
         if axBool(button, kAXEnabledAttribute) == false {
-            return .unavailable("button '\(buttonTitle(button))' is disabled")
+            return .unavailable("button '\(title)' is disabled")
         }
         let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
         if result != .success {
-            return .unavailable("AXPress failed on '\(buttonTitle(button))' (AXError \(result.rawValue))")
+            return .unavailable("AXPress failed on '\(title)' (AXError \(result.rawValue))")
         }
         // Report whether the dialog went away (a Save panel may be followed by another alert).
         var closed = false
@@ -190,7 +196,7 @@ func cmdDialog(_ args: [String]) {
                 break
             }
         }
-        var out: [String: Any] = ["pressed": buttonTitle(button), "method": "AXPress", "closed": closed]
+        var out: [String: Any] = ["pressed": title, "method": "AXPress", "closed": closed]
         if let next = findDialog(d.app), !CFEqual(next.element, current.element) {
             out["next"] = dialogJSON(next)
         }

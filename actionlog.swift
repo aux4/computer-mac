@@ -115,7 +115,7 @@ final class ActionLog: @unchecked Sendable {
         if let mode = out["mode"] as? String { entry["mode"] = mode }
         if result != nil {
             entry["result"] = "ok"
-            if let method = out["method"] as? String { entry["method"] = method }
+            if let method = (out["method"] as? String) ?? (out["action"] as? String) { entry["method"] = method }
             if let reason = out["fallbackReason"] as? String { entry["fallbackReason"] = reason }
         } else {
             entry["result"] = "error"

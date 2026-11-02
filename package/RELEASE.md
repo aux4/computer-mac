@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.5.1
+
+- `dialog --press` reports the title of the button it pressed (it was empty once the dialog closed).
+- `dialog` reports a "keep this new document?" sheet with a Save As name field as `save-panel`.
+- `set --checked` never repeats a press that didn't change the state (it could toggle a control back
+  when the app acted on it without updating its state); in `auto` that case is retried with the app in front.
+- The action log records `click`'s accessibility action as its `method`.
+
 ## 0.5.0
 
 - `state`: one call with the frontmost app, the target app (pid, bundle id, hidden), its windows, the

@@ -38,7 +38,7 @@ aux4 computer mac dialog --app TextEdit
 ```
 
 ```json
-{"app":"TextEdit","dialog":{"app":"TextEdit","buttons":[{"cancel":false,"default":false,"ref":"0.4.6","title":"Delete"},{"cancel":true,"default":false,"ref":"0.4.7","title":"Cancel"},{"cancel":false,"default":true,"ref":"0.4.8","title":"Save"}],"fields":[{"ref":"0.4.2","role":"AXTextField","value":"Untitled"}],"kind":"save-panel","text":["Do you want to keep this new document “Untitled”?"],"title":"","window":"Untitled"}}
+{"app":"TextEdit","dialog":{"app":"TextEdit","buttons":[{"cancel":false,"center":{"x":389,"y":490},"default":false,"enabled":true,"focused":false,"frame":{"height":32,"width":86,"x":346,"y":474},"label":"Delete","ref":"0.8.13","role":"AXButton","title":"Delete","value":"","windowCenter":{"x":56,"y":359}},{"cancel":false,"center":{"x":559,"y":490},"default":false,"enabled":true,"focused":false,"frame":{"height":32,"width":86,"x":516,"y":474},"label":"Cancel","ref":"0.8.14","role":"AXButton","title":"Cancel","value":"","windowCenter":{"x":226,"y":359}},{"cancel":false,"center":{"x":639,"y":490},"default":false,"enabled":true,"focused":false,"frame":{"height":32,"width":86,"x":596,"y":474},"label":"Save","ref":"0.8.15","role":"AXButton","title":"Save","value":"","windowCenter":{"x":306,"y":359}}],"fields":[{"center":{"x":540.5,"y":312},"enabled":true,"focused":false,"frame":{"height":22,"width":235,"x":423,"y":301},"label":"","ref":"0.8.5","role":"AXTextField","value":"Untitled","windowCenter":{"x":207.5,"y":181}},{"center":{"x":527,"y":387.5},"enabled":true,"focused":false,"frame":{"height":25,"width":214,"x":420,"y":375},"label":"Where:","ref":"0.8.9","role":"AXPopUpButton","value":"Documents","windowCenter":{"x":194,"y":256.5}}],"frame":{"height":388,"width":362,"x":333,"y":131},"kind":"save-panel","ref":"0.8","text":["Do you want to keep this new document “Untitled”?","You can choose to save your changes, or delete this document immediately. You can’t undo this action.","Save As:","Where:"],"title":"save","window":"Untitled"}}
 ```
 
 ```bash
@@ -46,5 +46,5 @@ aux4 computer mac dialog --app TextEdit --press "Delete"
 ```
 
 ```json
-{"app":"TextEdit","closed":true,"dialog":{"kind":"save-panel","title":""},"kind":"save-panel","method":"AXPress","mode":"background","pressed":"Delete"}
+{"app":"TextEdit","closed":true,"dialog":{"kind":"save-panel","title":"save"},"kind":"save-panel","method":"AXPress","mode":"background","pressed":"Delete"}
 ```

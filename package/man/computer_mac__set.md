@@ -6,7 +6,9 @@ and `after`. The element is a `ref` from `find`, `state` or `read`. Give exactly
 - **`--value <v>`** — the value of a text field, text area, combo box or slider. Sliders, steppers and
   other numeric elements take a number. Replaces the whole value (to insert at the cursor, use `type`).
 - **`--checked true|false`** — presses a checkbox, radio button or switch until it's in that state (a
-  mixed checkbox may take two presses; already in that state is a no-op, `"method":"unchanged"`).
+  mixed checkbox may take two presses; already in that state is a no-op, `"method":"unchanged"`). A press
+  that doesn't change the state is never repeated — some controls (e.g. TextEdit's bold/italic buttons)
+  only act while their app is in front, so `auto` then presses once more with the app brought forward.
 - **`--option <title>`** — picks an option of a pop-up button (through its menu), a combo box, or a radio
   group / tab group (by the button's title). Titles match case-insensitively; the error lists the
   available options.

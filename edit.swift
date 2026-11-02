@@ -195,17 +195,29 @@ func setChecked(_ element: AXUIElement, role: String, _ want: Bool) -> Backgroun
     guard axActions(element).contains(kAXPressAction) else {
         return .unavailable("\(role) can't be pressed through Accessibility")
     }
-    // A mixed checkbox (2) may need two presses to reach on/off.
+    // A mixed checkbox (2) may need two presses to reach on/off. A press that changes nothing isn't
+    // repeated: the app may have acted on it anyway (some only update the state while in front), and
+    // pressing again could toggle it back.
     var presses = 0
-    while (state() == 1) != want && presses < 3 {
+    var current = before
+    while (current == 1) != want && presses < 2 {
         let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
         if result != .success { return .unavailable("AXPress failed (AXError \(result.rawValue))") }
         presses += 1
-        usleep(100_000)
+        var next = current
+        for _ in 0..<6 {
+            usleep(50_000)
+            next = state() ?? current
+            if next != current { break }
+        }
+        if next == current {
+            return .unavailable("pressing didn't change the element's state while \(presses == 1 ? "the app is" : "it was") in the background")
+        }
+        current = next
     }
-    let after = state() ?? before
+    let after = current
     if (after == 1) != want {
-        return .unavailable("the element stayed \(after == 1 ? "checked" : "unchecked") after \(presses) presses")
+        return .unavailable("the element is still \(after == 1 ? "checked" : "unchecked") after \(presses) presses")
     }
     return .done(["method": presses == 0 ? "unchanged" : "AXPress", "before": before == 1, "after": after == 1, "presses": presses])
 }
