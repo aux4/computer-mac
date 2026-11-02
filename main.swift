@@ -2018,10 +2018,10 @@ final class CaptureHealth: @unchecked Sendable {
 // ocrTick reads the app's window (or the main display) in the background only: a window that isn't
 // on screen is simply not seen this check — wait never brings an app forward. Capture and recognition
 // are each bounded by `budget` seconds.
-func ocrTick(app: NSRunningApplication?, text: String, budget: Double) async -> OCRCheck {
+func ocrTick(app: NSRunningApplication?, text: String, budget: Double, deadline: Date) async -> OCRCheck {
     if CaptureHealth.shared.isStalled { return .unavailable("screen capture did not respond") }
     if OCRWorker.shared.isBusy { return .pending }
-    let (captured, timedOut) = await captureWithin(budget, pid: app?.processIdentifier)
+    let (captured, timedOut) = await captureWithin(min(budget, deadline.timeIntervalSinceNow), pid: app?.processIdentifier)
     if timedOut {
         CaptureHealth.shared.markStalled()
         return .unavailable("screen capture did not respond")
@@ -2031,7 +2031,8 @@ func ocrTick(app: NSRunningApplication?, text: String, budget: Double) async -> 
         return CGRect(x: px.origin.x + r.origin.x / px.scale, y: px.origin.y + r.origin.y / px.scale,
                       width: r.width / px.scale, height: r.height / px.scale)
     }
-    guard let lines = OCRWorker.shared.recognize(px.image, filter: text, wait: budget) else { return .pending }
+    // Whatever the capture used comes off the recognition's share: neither may run past the deadline.
+    guard let lines = OCRWorker.shared.recognize(px.image, filter: text, wait: min(budget, deadline.timeIntervalSinceNow)) else { return .pending }
     var matches: [[String: Any]] = []
     var seen: [String] = []
     for line in lines {
@@ -2072,6 +2073,11 @@ final class WaitOutcome: @unchecked Sendable {
         finished = true
         var err = timeoutError
         err["waited"] = round2(Date().timeIntervalSince(start))
+        // Say what was still in flight when time ran out.
+        if OCRWorker.shared.isBusy, var seen = err["seen"] as? [String: Any], seen["ocrUnavailable"] == nil {
+            seen["ocrPending"] = true
+            err["seen"] = seen
+        }
         failJSON(err)
     }
 
@@ -2210,7 +2216,7 @@ func cmdWait(_ args: [String]) async {
                 // --gone in auto the accessibility answer is already in hand, so OCR gets less time.
                 let cap = gone && useAX ? 0.4 : min(max(interval, 1.0), 2.0)
                 let budget = min(cap, deadline.timeIntervalSinceNow)
-                switch await ocrTick(app: app, text: text, budget: budget) {
+                switch await ocrTick(app: app, text: text, budget: budget, deadline: deadline) {
                 case .read(let matches, let seen):
                     tick.seen["ocr"] = seen
                     if !matches.isEmpty {
