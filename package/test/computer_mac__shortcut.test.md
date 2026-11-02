@@ -74,3 +74,15 @@ aux4 computer mac shortcut "hyper+a"
 ```error
 {"error":"Unknown modifier: hyper"}
 ```
+
+## stop switch
+
+### should refuse while the stop switch is on
+
+```execute
+AUX4_COMPUTER_MAC_STOP=1 AUX4_COMPUTER_MAC_LOG_FILE=$PWD/shortcut-stop.jsonl aux4 computer mac shortcut cmd+a --app TextEdit 2>&1 | jq -c '{stopped, command}'; rm -f shortcut-stop.jsonl
+```
+
+```expect
+{"stopped":true,"command":"shortcut"}
+```

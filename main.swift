@@ -10,6 +10,7 @@ import Vision
 // MARK: - JSON helpers
 
 func printJSON(_ obj: Any) {
+    ActionLog.shared.finish(result: (obj as? [String: Any]) ?? [:], error: nil)
     guard JSONSerialization.isValidJSONObject(obj) else {
         FileHandle.standardOutput.write("{\"error\":\"internal: invalid JSON object\"}\n".data(using: .utf8)!)
         return
@@ -23,6 +24,7 @@ func printJSON(_ obj: Any) {
 }
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
+    ActionLog.shared.finish(result: nil, error: ["error": message])
     guard let data = try? JSONSerialization.data(withJSONObject: ["error": message], options: [.sortedKeys, .withoutEscapingSlashes]) else {
         FileHandle.standardError.write("{\"error\":\"internal: failed to encode error\"}\n".data(using: .utf8)!)
         exit(code)
@@ -184,9 +186,15 @@ func cmdWindows() {
     printJSON(["windows": windowList()])
 }
 
+// findRunningApp accepts an app name (exact, then partial, case-insensitive) or a bundle id
+// (com.apple.TextEdit).
 func findRunningApp(named name: String) -> NSRunningApplication? {
     let lower = name.lowercased()
     let apps = NSWorkspace.shared.runningApplications
+    if looksLikeBundleId(name),
+       let byId = apps.first(where: { ($0.bundleIdentifier ?? "").lowercased() == lower && !$0.isTerminated }) {
+        return byId
+    }
     if let exact = apps.first(where: { ($0.localizedName ?? "").lowercased() == lower }) {
         return exact
     }
@@ -214,6 +222,12 @@ func runOpen(_ appName: String, background: Bool) {
 }
 
 func applicationURL(named name: String) -> URL? {
+    if looksLikeBundleId(name) {
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: name)
+    }
+    if name.hasPrefix("/") && name.lowercased().hasSuffix(".app") && FileManager.default.fileExists(atPath: name) {
+        return URL(fileURLWithPath: name)
+    }
     let fm = FileManager.default
     let fileName = name.lowercased().hasSuffix(".app") ? name : name + ".app"
     let dirs = ["/Applications", "/System/Applications", "/System/Applications/Utilities",
@@ -225,46 +239,203 @@ func applicationURL(named name: String) -> URL? {
     return nil
 }
 
-func cmdOpen(_ args: [String]) {
-    let appName = argAt(args, 0)
-    if appName.isEmpty {
-        fail("--app is required")
+func looksLikeBundleId(_ s: String) -> Bool {
+    // com.apple.TextEdit: dotted, no spaces or slashes, not an .app name.
+    let parts = s.split(separator: ".")
+    return parts.count >= 2 && !s.contains(" ") && !s.contains("/") && !s.lowercased().hasSuffix(".app")
+        && parts.allSatisfy { !$0.isEmpty }
+}
+
+func parseBoolFlag(_ raw: String, name: String) -> Bool {
+    let s = raw.lowercased()
+    if s.isEmpty || s == "false" { return false }
+    if s == "true" { return true }
+    fail("Invalid --\(name) '\(raw)': use true or false")
+}
+
+// openWindowFor finds the app window to report for 'open --wait': with a file, the window showing
+// it (by document URL or title); otherwise the app's main/first window. Accessibility windows are
+// used so a hidden app's windows count too.
+func openWindowFor(_ app: NSRunningApplication, file: URL?) -> [String: Any]? {
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, 2.0)
+    let windows = axWindows(axApp)
+    func entry(_ w: AXUIElement) -> [String: Any] {
+        var e: [String: Any] = ["title": axString(w, kAXTitleAttribute) ?? ""]
+        if let f = axFrame(w) { e["frame"] = frameJSON(f) }
+        if let ref = axRefOf(w, in: axApp) { e["ref"] = ref }
+        return e
     }
+    if let file = file {
+        let name = file.deletingPathExtension().lastPathComponent.lowercased()
+        let full = file.lastPathComponent.lowercased()
+        for w in windows {
+            if let doc = axString(w, kAXDocumentAttribute), let url = URL(string: doc),
+               url.standardizedFileURL.resolvingSymlinksInPath().path == file.standardizedFileURL.resolvingSymlinksInPath().path {
+                return entry(w)
+            }
+            let title = (axString(w, kAXTitleAttribute) ?? "").lowercased()
+            if !name.isEmpty && (title == full || title == name || title.hasPrefix(name + " ") || title.hasPrefix(full + " ")) {
+                return entry(w)
+            }
+        }
+        return nil
+    }
+    let main = windows.first(where: { axBool($0, kAXMainAttribute) == true }) ?? windows.first
+    return main.map(entry)
+}
+
+func cmdOpen(_ args: [String]) {
+    let appArg = argAt(args, 0)
     let mode = parseMode(argAt(args, 1))
+    let fileArg = argAt(args, 2)
+    let urlArg = argAt(args, 3)
+    let waitArg = argAt(args, 4)
+    let hidden = parseBoolFlag(argAt(args, 5), name: "hidden")
+    if appArg.isEmpty && fileArg.isEmpty && urlArg.isEmpty {
+        fail("--app is required (or give --file or --url)")
+    }
+    if !fileArg.isEmpty && !urlArg.isEmpty {
+        fail("Give either --file or --url, not both")
+    }
+    let waitTimeout: Double? = waitArg.isEmpty ? nil : parseDuration(waitArg, name: "wait")
+    if hidden && mode == .foreground {
+        fail("--hidden true opens the app without showing it; it can't be combined with --mode foreground")
+    }
+
+    var fileURL: URL? = nil
+    if !fileArg.isEmpty {
+        let path = (fileArg as NSString).expandingTildeInPath
+        let absolute = path.hasPrefix("/") ? path : FileManager.default.currentDirectoryPath + "/" + path
+        guard FileManager.default.fileExists(atPath: absolute) else {
+            fail("File not found: \(fileArg)")
+        }
+        fileURL = URL(fileURLWithPath: absolute).standardizedFileURL
+    }
+    var openURL: URL? = nil
+    if !urlArg.isEmpty {
+        guard let u = URL(string: urlArg), let scheme = u.scheme, !scheme.isEmpty else {
+            fail("Invalid --url '\(urlArg)': include the scheme, e.g. https://aux4.io")
+        }
+        openURL = u
+    }
+    let document = fileURL ?? openURL
+
+    var base: [String: Any] = ["opened": appArg.isEmpty ? (fileArg.isEmpty ? urlArg : fileArg) : appArg]
+    if let f = fileURL { base["file"] = f.path }
+    if !urlArg.isEmpty { base["url"] = urlArg }
+    if hidden { base["hidden"] = true }
+
+    // The app to open with: the one named, or the default handler of the file/URL.
+    var appURL: URL? = nil
+    if !appArg.isEmpty {
+        appURL = applicationURL(named: appArg)
+        if appURL == nil && document != nil && findRunningApp(named: appArg) == nil {
+            fail("App not found: \(appArg)")
+        }
+    } else if let doc = document {
+        appURL = NSWorkspace.shared.urlForApplication(toOpen: doc)
+        if appURL == nil { fail("No application opens \(fileArg.isEmpty ? urlArg : fileArg)") }
+    }
+    if isDryRun() {
+        runAction("open", mode: mode, base: base, plan: .attempt({ .done([:]) })) { [:] }
+        return
+    }
+
+    // launch opens via NSWorkspace (without activating unless foreground) and returns the app.
+    func launch(activates: Bool) -> NSRunningApplication? {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = activates
+        config.hides = hidden
+        config.addsToRecentItems = false
+        var launched: NSRunningApplication? = nil
+        var launchError: Error? = nil
+        var finished = false
+        let done: (NSRunningApplication?, Error?) -> Void = { app, error in
+            launched = app
+            launchError = error
+            finished = true
+        }
+        if let doc = document {
+            let handler = appURL ?? findRunningApp(named: appArg)?.bundleURL
+            guard let h = handler else { fail("App not found: \(appArg)") }
+            NSWorkspace.shared.open([doc], withApplicationAt: h, configuration: config, completionHandler: done)
+        } else if let url = appURL {
+            NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: done)
+        } else {
+            runOpen(appArg, background: !activates)
+            return findRunningApp(named: appArg)
+        }
+        for _ in 0..<600 where !finished { spinRunLoop(0.025) }
+        if let error = launchError {
+            fail("Failed to open \(document.map { $0.isFileURL ? $0.path : $0.absoluteString } ?? appArg): \(error.localizedDescription)")
+        }
+        return launched ?? (appArg.isEmpty ? nil : findRunningApp(named: appArg))
+    }
+
+    // waitForWindow polls until the app shows a window (the file's window with --file).
+    func waitForWindow(_ app: NSRunningApplication?, _ out: inout [String: Any]) {
+        guard let timeout = waitTimeout else { return }
+        let start = Date()
+        let deadline = start.addingTimeInterval(timeout)
+        while true {
+            if let a = app, let w = openWindowFor(a, file: fileURL) {
+                out["window"] = w
+                out["waited"] = round2(Date().timeIntervalSince(start))
+                return
+            }
+            if Date() >= deadline { break }
+            spinRunLoop(until: min(Date().addingTimeInterval(0.2), deadline))
+        }
+        var err = out
+        err["error"] = "Timed out after \(waitArg) waiting for \(app?.localizedName ?? appArg) to show \(fileURL != nil ? "a window for \(fileURL!.lastPathComponent)" : "a window")"
+        err["timeout"] = round2(timeout)
+        failJSON(err)
+    }
+
+    func describe(_ app: NSRunningApplication?, _ out: inout [String: Any]) {
+        guard let a = app else { return }
+        out["app"] = a.localizedName ?? appArg
+        out["pid"] = Int(a.processIdentifier)
+        if let b = a.bundleIdentifier { out["bundleId"] = b }
+    }
+
     let plan: BackgroundPlan = .attempt({
-        // Already running: it's open. Re-opening would make macOS bring it forward (a reopen
-        // event activates the app even with 'open -g'), so leave it untouched.
-        if let running = findRunningApp(named: appName), running.activationPolicy == .regular {
-            return .done(["alreadyRunning": true, "app": running.localizedName ?? appName])
+        var out: [String: Any] = [:]
+        // Already running and nothing to open: it's open. Re-opening would make macOS bring it
+        // forward (a reopen event activates the app even with 'open -g'), so leave it untouched.
+        if document == nil, let running = findRunningApp(named: appArg), running.activationPolicy == .regular {
+            out["alreadyRunning"] = true
+            describe(running, &out)
+            waitForWindow(running, &out)
+            return .done(out)
         }
         let saved = captureUserState()
-        if let url = applicationURL(named: appName) {
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = false
-            config.addsToRecentItems = false
-            var launchError: Error? = nil
-            var finished = false
-            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
-                launchError = error
-                finished = true
+        let app = launch(activates: false)
+        describe(app, &out)
+        // Opening a document can show the app even when asked to launch hidden: hide it then.
+        if hidden, let a = app {
+            for _ in 0..<40 where !a.isHidden {
+                AXUIElementSetAttributeValue(AXUIElementCreateApplication(a.processIdentifier), kAXHiddenAttribute as CFString, kCFBooleanTrue)
+                spinRunLoop(0.05)
+                if axBool(AXUIElementCreateApplication(a.processIdentifier), kAXHiddenAttribute) == true { break }
             }
-            for _ in 0..<400 where !finished { spinRunLoop(0.025) }
-            if let error = launchError {
-                fail("Failed to open app '\(appName)': \(error.localizedDescription)")
-            }
-        } else {
-            runOpen(appName, background: true)
         }
-        // Some apps activate themselves on launch anyway; put the user's frontmost app back.
+        // Some apps activate themselves on launch/open anyway; put the user's frontmost app back.
         spinRunLoop(0.5)
-        if let front = saved.frontmost, !isFrontmost(front.processIdentifier) {
-            return .done(["restored": ["frontmost": bringToFront(front)]])
+        if let front = saved.frontmost, front.processIdentifier != app?.processIdentifier || hidden,
+           !isFrontmost(front.processIdentifier) {
+            out["restored"] = ["frontmost": bringToFront(front)]
         }
-        return .done([:])
+        waitForWindow(app, &out)
+        return .done(out)
     })
-    runAction("open", mode: mode, base: ["opened": appName], plan: plan) {
-        runOpen(appName, background: false)
-        return [:]
+    runAction("open", mode: mode, base: base, plan: plan) {
+        var out: [String: Any] = [:]
+        let app = launch(activates: true)
+        describe(app, &out)
+        waitForWindow(app, &out)
+        return out
     }
 }
 
@@ -1231,6 +1402,14 @@ func pressShortcutInBackground(_ target: Target, _ combo: KeyCombo) -> Backgroun
             return .done(["method": "menu", "menuItem": axString(item, kAXTitleAttribute) ?? ""])
         }
     }
+    // cmd+a is Select All, which a background app keeps disabled: select the focused text through
+    // Accessibility instead (what 'select --all' does).
+    if combo.keyName == "a" && combo.modifiers.count == 1 && combo.modifiers[0].1 == .maskCommand,
+       let focused = focusedElement(target), case .done(let info) = axSelectAll(focused) {
+        var out: [String: Any] = ["method": "accessibility"]
+        out["selected"] = info["length"]
+        return .done(out)
+    }
     if isFrontmost(target.pid) {
         if let error = postCombo(combo, pid: target.pid) { return .unavailable(error) }
         return .done(["method": "postToPid"])
@@ -2019,6 +2198,7 @@ func round2(_ v: Double) -> NSNumber {
 }
 
 func failJSON(_ obj: [String: Any], code: Int32 = 1) -> Never {
+    ActionLog.shared.finish(result: nil, error: obj)
     if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]) {
         FileHandle.standardError.write(data)
         FileHandle.standardError.write("\n".data(using: .utf8)!)
@@ -2483,6 +2663,12 @@ guard allArgs.count > 1 else {
 let command = allArgs[1]
 let rest = Array(allArgs.dropFirst(2))
 
+// Input/state commands are recorded in the action log and refused while the stop switch is on.
+if isActionInvocation(command, rest) {
+    ActionLog.shared.begin(command, rest)
+    guardStopSwitch(command)
+}
+
 switch command {
 case "permissions": cmdPermissions()
 case "cursor": cmdCursor()
@@ -2514,6 +2700,14 @@ case "ocr-warmup": cmdOcrWarmup()
 case "clipboard-read": cmdClipboardRead()
 case "clipboard-copy": cmdClipboardCopy(rest)
 case "clipboard-paste": cmdClipboardPaste(rest)
+case "menu": cmdMenu(rest)
+case "select": cmdSelect(rest)
+case "set": cmdSet(rest)
+case "state": cmdState(rest)
+case "dialog": cmdDialog(rest)
+case "log": cmdLog(rest)
+case "stop": cmdStop()
+case "resume": cmdResume()
 default:
     fail("Unknown command: \(command)")
 }

@@ -247,6 +247,95 @@ jobs:
           # Screenshot of a single window must work (regression: CGS_REQUIRE_INIT crash).
           aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/screenshots/calculator.png" | jq -e '.width > 0' > /dev/null
 
+      # Batch 1 commands against the same Calculator/TextEdit: state, menu, select, set, dialog,
+      # open --file --wait, the action log and the stop switch. Runs after the typing test, so
+      # TextEdit holds an untitled document with "Hello from aux4/computer-mac CI".
+      - name: Live UI test (state, menu, select, set, dialog, open, log, stop)
+        shell: bash
+        working-directory: package
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP/batch1"; mkdir -p "$T"
+          cm() { aux4 computer mac "$@"; }
+          check() { # check <name> <jq filter> < json
+            local name="$1" filter="$2" json; json=$(cat); echo "$json" > "$T/$name.json"; echo "$name: $json" | cut -c1-600
+            if ! echo "$json" | jq -e "$filter" > /dev/null; then echo "::error::$name: expected $filter"; exit 1; fi
+          }
+
+          # state: one call with the app, windows, focus, dialog and a compact element tree.
+          cm state --app Calculator | check state-calculator '.app.name == "Calculator" and (.app.pid | type == "number") and (.windows | length > 0) and has("focused") and .dialog == null and (.elements | length > 0) and (.frontmost.pid | type == "number")'
+          cm state --app com.apple.TextEdit | check state-textedit '.app.bundleId == "com.apple.TextEdit" and ([.elements[] | select(.role == "AXTextArea")] | length > 0)'
+
+          # menu: list, then toggle Calculator's view through its menu items in the background.
+          cm menu --app Calculator | check menu-calculator '[.menus[].title] | index("View") != null'
+          cm menu --app Calculator --path "View > Scientific" --mode background | check menu-scientific '.mode == "background" and .pressed == "Scientific"'
+          sleep 0.5
+          cm menu --app Calculator | check menu-checked '[.menus[] | select(.title == "View") | .children[] | select(.title == "Scientific")][0].checked == true'
+          cm menu --app Calculator --path "view > basic" --mode background | check menu-basic '.mode == "background" and .path == ["View", "Basic"]'
+          if cm menu --app Calculator --path "View > No Such Item" 2> "$T/menu-missing.err"; then echo "::error::menu accepted a missing item"; exit 1; fi
+          grep -q "Available: " "$T/menu-missing.err"
+
+          # select + copy in the background, and cmd+a through the same accessibility selection.
+          TEXT="Hello from aux4/computer-mac CI"
+          cm select --app TextEdit --all true --mode background | check select-all ".mode == \"background\" and .selected == \"$TEXT\" and .range.start == 0"
+          cm clipboard copy --app TextEdit --mode background | check copy-selection ".mode == \"background\" and .text == \"$TEXT\""
+          cm select --app TextEdit --text aux4 --mode background | check select-text '.selected == "aux4" and .range.start == 11 and .range.length == 4'
+          cm select --app TextEdit --start 0 --length 5 --mode background | check select-range '.selected == "Hello"'
+          cm shortcut cmd+a --app TextEdit --mode background | check shortcut-select-all '.mode == "background"'
+
+          # set: the text area's value, then (when the window has them) a pop-up and a checkbox.
+          AREA=$(cm find "" --role AXTextArea --app TextEdit | jq -r '.matches[0].ref')
+          cm set --app TextEdit --element "$AREA" --value "Set by aux4/computer-mac CI" --mode background | check set-value ".before == \"$TEXT\" and .after == \"Set by aux4/computer-mac CI\" and .mode == \"background\""
+          POPUP=$(cm find "" --role AXPopUpButton --app TextEdit | jq -c '[.matches[] | select(.value != "")][0] // empty')
+          if [ -n "$POPUP" ]; then
+            cm set --app TextEdit --element "$(echo "$POPUP" | jq -r .ref)" --option "$(echo "$POPUP" | jq -r .value)" | check set-option '.after == .before'
+          else
+            echo "::warning::no AXPopUpButton with a value in TextEdit's window; set --option not exercised live"
+          fi
+          BOX=$(cm find "" --role AXCheckBox --app TextEdit | jq -r '.matches[0].ref // empty')
+          if [ -n "$BOX" ]; then
+            BEFORE=$(cm set --app TextEdit --element "$BOX" --checked true | tee "$T/set-checked.json" | jq -r .before)
+            cat "$T/set-checked.json"; jq -e '.after == true' "$T/set-checked.json" > /dev/null
+            cm set --app TextEdit --element "$BOX" --checked "$BEFORE" | check set-checked-restore ".after == $BEFORE"
+          else
+            echo "::warning::no AXCheckBox in TextEdit's window; set --checked not exercised live"
+          fi
+
+          # dialog: closing the unsaved untitled document opens TextEdit's save sheet; answer it.
+          cm dialog --app TextEdit | check dialog-none '.dialog == null'
+          CLOSE=$(cm state --app TextEdit | jq -r '[.elements[] | select(.subrole == "AXCloseButton")][0].ref // empty')
+          if [ -n "$CLOSE" ]; then
+            cm click --element "$CLOSE" --app TextEdit --mode background
+          else
+            cm menu --app TextEdit --path "File > Close"
+          fi
+          for i in $(seq 1 25); do
+            cm dialog --app TextEdit > "$T/dialog.json"
+            jq -e '.dialog != null' "$T/dialog.json" > /dev/null && break
+            sleep 0.2
+          done
+          check dialog-open '.dialog.kind == "sheet" or .dialog.kind == "save-panel"' < "$T/dialog.json"
+          BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' "$T/dialog.json")
+          if [ -z "$BUTTON" ]; then echo "::error::no Delete/Don't Save button: $(jq -c '[.dialog.buttons[].title]' "$T/dialog.json")"; exit 1; fi
+          cm dialog --app TextEdit --press "$BUTTON" --mode background | check dialog-press '.closed == true and .mode == "background"'
+          cm dialog --app TextEdit | check dialog-gone '.dialog == null'
+
+          # open --file in an app given by bundle id, waiting for the file's window.
+          echo "Opened by aux4/computer-mac CI" > "$RUNNER_TEMP/aux4-open-test.txt"
+          cm open --file "$RUNNER_TEMP/aux4-open-test.txt" --app com.apple.TextEdit --wait 20s | check open-file '.window.frame.width > 0 and (.window.title | test("aux4-open-test")) and .bundleId == "com.apple.TextEdit"'
+          cm wait --app TextEdit --text "Opened by aux4/computer-mac CI" --source ax --timeout 10s | check open-file-text '.matches | length > 0'
+
+          # action log: every input/state command above was recorded.
+          cm log --limit 60 | check log '([.entries[].command] as $c | ["state"] - $c == ["state"] and ($c | index("menu")) and ($c | index("select")) and ($c | index("set")) and ($c | index("dialog")) and ($c | index("open")) and ($c | index("clipboard copy"))) and ([.entries[] | select(.command == "dialog")][-1].result == "ok")'
+
+          # stop switch: input refused, read-only allowed, resume restores input.
+          cm stop | check stop '.stopped == true'
+          if cm click --x 5 --y 5 --app Calculator 2> "$T/stopped.err"; then echo "::error::click ran while stopped"; exit 1; fi
+          jq -e '.stopped == true and .command == "click"' "$T/stopped.err"
+          cm state --app Calculator --depth 0 | check stopped-read-only '.app.name == "Calculator"'
+          cm resume | check resume '.stopped == false'
+          cm menu --app Calculator --path "View > Basic" --mode background | check resumed '.mode == "background"'
+
       # Keep what the apps looked like, especially when a live check failed.
       - name: Capture screenshots
         if: always()
@@ -266,6 +355,7 @@ jobs:
             ${{ runner.temp }}/screenshots
             ${{ runner.temp }}/calculator-ocr.json
             ${{ runner.temp }}/wait-*
+            ${{ runner.temp }}/batch1
           if-no-files-found: warn
 
 
