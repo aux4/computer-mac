@@ -1611,7 +1611,7 @@ final class RecognitionState: @unchecked Sendable {
     var inProgress: Bool { lock.lock(); defer { lock.unlock() }; return active }
 }
 
-let ocrWarmupNote = "text recognition did not finish in time: macOS's Neural Engine compiler was still preparing the text models (about 30s the first time; longer while it is busy with other requests); it continues in the background, so retry shortly"
+let ocrWarmupNote = "macOS may still be preparing its text-recognition model: the first recognition after installing/updating this package or restarting can take about 30s, and that preparation continues in the background, so retry shortly. If every call is slow, macOS's Neural Engine compiler is stuck: 'sudo killall ANECompilerService' or a restart clears it"
 
 // spawnOCRWarmup starts a detached 'ocr-warmup' of this same binary, so a recognition pass cut short
 // by a deadline still finishes preparing the models for the next call. At most one runs at a time

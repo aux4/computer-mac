@@ -107,5 +107,5 @@ aux4 computer mac ocr --app Calculator --text "1,792" --timeout 30s
 ```
 
 ```json
-{"error":"Text recognition did not finish within 30s","note":"text recognition did not finish in time: macOS's Neural Engine compiler was still preparing the text models (about 30s the first time; longer while it is busy with other requests); it continues in the background, so retry shortly","phase":"recognition","timeout":30,"waited":30,"warmup":true}
+{"error":"Text recognition did not finish within 30s","note":"macOS may still be preparing its text-recognition model: the first recognition after installing/updating this package or restarting can take about 30s, and that preparation continues in the background, so retry shortly. If every call is slow, macOS's Neural Engine compiler is stuck: 'sudo killall ANECompilerService' or a restart clears it","phase":"recognition","timeout":30,"waited":30,"warmup":true}
 ```

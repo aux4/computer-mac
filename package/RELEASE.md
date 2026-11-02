@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.4.4
+
+- `ocr`/`wait` timeout notes say what to do when every call is slow (macOS's Neural Engine compiler
+  is stuck: `sudo killall ANECompilerService` or a restart clears it). New README Troubleshooting
+  section.
+
 ## 0.4.3
 
 - `ocr --timeout` (default `60s`): `ocr` always stops at the deadline with exit code `1` and a JSON

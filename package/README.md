@@ -272,3 +272,19 @@ aux4 computer mac clipboard paste --text "replaced via agent"
 Every command prints a single JSON object to stdout. On failure (bad arguments, missing permission,
 element not found, app not running) it prints `{"error": "..."}` and exits non-zero — agents should check
 the exit code or the presence of an `error` key rather than parsing stdout as always-successful.
+
+## Troubleshooting
+
+### `ocr` (or OCR in `wait`) is slow or times out
+
+On a Mac with a Neural Engine, macOS prepares its text-recognition model the first time a new install
+of this package recognizes text (also after a macOS update or restart): that first call takes about
+30s, then every call takes a fraction of a second. `ocr`'s default `--timeout` of `60s` covers it.
+With a short deadline (for example `wait --timeout 5s`), OCR may not contribute on that first cold
+call; the accessibility tree is still checked, and the error's `note`/`notes` says the model was still
+being prepared. The preparation then finishes in the background (`"warmup":true`), so retry shortly.
+
+If **every** call takes ~30s or longer, macOS's Neural Engine compiler is stuck or backed up: check
+whether `ANECompilerService` sits at ~100% CPU (Activity Monitor or `ps -axo pcpu,comm | grep ANECompiler`),
+stop any leftover `aux4-computer-mac` processes, and run `sudo killall ANECompilerService` (or restart
+the Mac). Recognition is back to ~0.1–0.3s afterwards.
