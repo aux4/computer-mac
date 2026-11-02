@@ -108,10 +108,6 @@ jobs:
         if: steps.perms.outputs.accessibility != 'true'
         shell: bash
         run: |
-          echo "Accessibility permission is NOT granted on this hosted macOS runner."
-          echo "Hosted GitHub macOS runners have no interactive session to approve a"
-          echo "TCC Accessibility/Screen Recording prompt, so this binary cannot be"
-          echo "pre-authorized here. This job is workflow_dispatch-only for exactly"
-          echo "this reason — it is documentation of the real-world constraint, not"
-          echo "a CI gate. Live verification of computer-mac happens on a real,"
-          echo "permission-granted Mac instead."
+          echo "::warning::Accessibility is not granted on this runner, so the live UI trial was skipped."
+          echo "GitHub-hosted macOS runners normally grant Accessibility and Screen Recording"
+          echo "(verified 2026-11-02 on macos-14); check whether the runner image changed."
