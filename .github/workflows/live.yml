@@ -33,6 +33,9 @@ jobs:
         run: |
           defaults write -g NSCloseAlwaysConfirmsChanges -bool true
           defaults write -g NSQuitAlwaysKeepsWindows -bool false
+          # Without state restoration TextEdit can't keep an untitled document across a quit: it asks.
+          defaults write -g ApplePersistence -bool false
+          defaults write com.apple.TextEdit ApplePersistence -bool false
 
       # Run from package/ so aux4 loads the package's own .aux4 (no install
       # needed); ${packageDir} then resolves to package/, where the binary is linked.
