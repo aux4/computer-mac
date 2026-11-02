@@ -26,17 +26,6 @@ jobs:
         shell: bash
         run: aux4 builder darwin
 
-      # Runner-only (disposable VM): make apps ask about unsaved changes when closing or quitting,
-      # as a Mac with "Ask to keep changes when closing documents" does, so quit's dialog path runs.
-      - name: Ask to keep changes on quit
-        shell: bash
-        run: |
-          defaults write -g NSCloseAlwaysConfirmsChanges -bool true
-          defaults write -g NSQuitAlwaysKeepsWindows -bool false
-          # Without state restoration TextEdit can't keep an untitled document across a quit: it asks.
-          defaults write -g ApplePersistence -bool false
-          defaults write com.apple.TextEdit ApplePersistence -bool false
-
       # Run from package/ so aux4 loads the package's own .aux4 (no install
       # needed); ${packageDir} then resolves to package/, where the binary is linked.
       - name: Link binary
@@ -356,7 +345,9 @@ jobs:
             [ "$(cm window list TextEdit | jq '[.windows[] | select(.subrole == null)] | length')" -gt 0 ] && break
             sleep 0.2
           done
-          cm type "Unsaved by aux4/computer-mac CI" --app TextEdit | check type-unsaved '.typed > 0'
+          # set --value marks the document edited (an inserted selection may not), so closing asks.
+          AREA=$(cm find "" --role AXTextArea --app TextEdit | jq -r '.matches[0].ref')
+          cm set --app TextEdit --element "$AREA" --value "Unsaved by aux4/computer-mac CI" | check set-unsaved '.after == "Unsaved by aux4/computer-mac CI"'
           cm wait --app TextEdit --text "Unsaved by aux4/computer-mac CI" --source ax --timeout 10s > /dev/null
           cm window close --app TextEdit | check close-unsaved '.closed == false and .dialog != null and (.note | test("dialog --app"))'
           if cm quit Finder --force true 2> "$T/quit-finder.err"; then echo "::error::force-quit Finder was not refused"; exit 1; fi
