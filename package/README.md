@@ -109,7 +109,7 @@ omitted).
 | `ocr` | The pixels, read as text: each line with its position in click coordinates | Text the accessibility tree doesn't expose (canvas UIs, images, remote desktops), and checking what is actually shown |
 
 All three work on a covered window with `--app`, and their positions line up: a `find --app` match's
-`windowCenter`, an `ocr --app` line's `windowCenter`, and a point in a `screenshot --app` image (divided by
+`windowCenter`, an `ocr --app` match's `windowCenter`, and a point in a `screenshot --app` image (divided by
 its `scale`) can all be passed to `click --app --x --y`.
 
 ### Reading text from pixels
@@ -120,16 +120,17 @@ aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [
 
 `ocr` recognizes text on this Mac (no network, nothing to download) in the main display, in an app's
 front window (`--app`, even when covered), or in an existing PNG (`--image`, no Screen Recording needed).
-Each line has `text`, `confidence` (`0`–`1`), a `frame` and a `center` in screen points, plus a
-`windowCenter` with `--app`. `--text` keeps only the lines containing that text (case-insensitive,
-whitespace-tolerant) and adds a `match` with the position of just that text.
+Each line of text is an entry in `matches` (the same key as `find`) with `text`, `confidence` (`0`–`1`),
+a `frame` and a `center` in screen points, plus a `windowCenter` with `--app`. `--text` keeps only the
+lines containing that text (case-insensitive, whitespace-tolerant; no match is an empty `matches` array,
+not an error) and adds a `match` with the position of just that text.
 
 ```bash
 aux4 computer mac ocr --app Calculator --text "1,792"
 ```
 
 ```json
-{"app":"Calculator","height":408,"level":"accurate","lines":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
+{"app":"Calculator","height":408,"level":"accurate","matches":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
 ```
 
 **Note:** very small or low-contrast text can be missed or misread, and `--level fast` is much weaker

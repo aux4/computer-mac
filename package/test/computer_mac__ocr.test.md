@@ -8,7 +8,7 @@ The fixture `fixtures/ocr-sample.png` is 600x200 and shows "Hello aux4" near the
 ### should return every line of text in reading order
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '[.lines[].text]'
+aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '[.matches[].text]'
 ```
 
 ```expect
@@ -35,7 +35,7 @@ aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '{source, width, h
 ### should give each line a top-left based frame and center
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png | jq '.lines[0] as $a | .lines[1] as $b | ($a.center.x > 100 and $a.center.x < 180 and $a.center.y > 35 and $a.center.y < 75) and ($b.center.x > 360 and $b.center.x < 450 and $b.center.y > 125 and $b.center.y < 170) and ($a.frame.x > 30 and $a.frame.x < 55 and $a.frame.width > 150) and ($a.confidence > 0.3)'
+aux4 computer mac ocr --image fixtures/ocr-sample.png | jq '.matches[0] as $a | .matches[1] as $b | ($a.center.x > 100 and $a.center.x < 180 and $a.center.y > 35 and $a.center.y < 75) and ($b.center.x > 360 and $b.center.x < 450 and $b.center.y > 125 and $b.center.y < 170) and ($a.frame.x > 30 and $a.frame.x < 55 and $a.frame.width > 150) and ($a.confidence > 0.3)'
 ```
 
 ```expect
@@ -45,7 +45,7 @@ true
 ### should not need the Screen Recording permission
 
 ```execute
-AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '[.lines[].text]'
+AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '[.matches[].text]'
 ```
 
 ```expect
@@ -55,7 +55,7 @@ AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac ocr --image fixtures/ocr-
 ### should convert pixels to points with --scale
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png --scale 2 | jq '.width == 300 and .height == 100 and .scale == 2 and .lines[0].center.x > 50 and .lines[0].center.x < 90'
+aux4 computer mac ocr --image fixtures/ocr-sample.png --scale 2 | jq '.width == 300 and .height == 100 and .scale == 2 and .matches[0].center.x > 50 and .matches[0].center.x < 90'
 ```
 
 ```expect
@@ -67,27 +67,27 @@ true
 ### should only return lines containing the text, case-insensitively
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png --text HELLO | jq -c '{text, lines: [.lines[].text]}'
+aux4 computer mac ocr --image fixtures/ocr-sample.png --text HELLO | jq -c '{text, matches: [.matches[].text]}'
 ```
 
 ```expect
-{"text":"HELLO","lines":["Hello aux4"]}
+{"text":"HELLO","matches":["Hello aux4"]}
 ```
 
 ### should locate just the matched text inside the line
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png --text "1,792" | jq '.lines[0] as $l | ($l.match.center.x > $l.center.x) and ($l.match.frame.width < $l.frame.width) and ($l.match.frame.x >= $l.frame.x)'
+aux4 computer mac ocr --image fixtures/ocr-sample.png --text "1,792" | jq '.matches[0] as $l | ($l.match.center.x > $l.center.x) and ($l.match.frame.width < $l.frame.width) and ($l.match.frame.x >= $l.frame.x)'
 ```
 
 ```expect
 true
 ```
 
-### should return no lines when nothing matches
+### should return an empty matches array when nothing matches
 
 ```execute
-aux4 computer mac ocr --image fixtures/ocr-sample.png --text "not on the image" | jq -c '.lines'
+aux4 computer mac ocr --image fixtures/ocr-sample.png --text "not on the image" | jq -c '.matches'
 ```
 
 ```expect

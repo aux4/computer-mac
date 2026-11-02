@@ -1,7 +1,8 @@
 #### Description
 
 Recognizes the text that is visible in pixels — on the screen, in one app's window, or in an existing PNG —
-and returns each line with its position in the same coordinates `click` uses. Recognition runs on this
+and returns each line of text as an entry in `matches` (the same key `find` uses) with its position in
+the same coordinates `click` uses. Recognition runs on this
 Mac with the system's built-in text recognition: no network, nothing to download.
 
 Use it when the accessibility tree doesn't expose what's on screen (canvas-drawn UIs, images, games,
@@ -15,7 +16,7 @@ When an app does expose its UI, `find` is faster and exact; `ocr` reads only wha
 - **`--image`** — recognizes a PNG instead of capturing. Needs no Screen Recording permission.
   Positions are image pixels divided by `--scale` (default `1`; pass the `scale` from `screenshot` to
   get points).
-- **`--text`** — only returns lines containing that text, case-insensitively and ignoring whitespace
+- **`--text`** — only returns the lines containing that text (none → `"matches": []`, exit `0`, like `find`), case-insensitively and ignoring whitespace
   differences (recognition sometimes reads `1,792` as `1 ,792`). Each line also gets a `match` with the
   `frame`/`center`/`windowCenter` of just the matched text, for clicking a word inside a longer line.
 - **`--level`** — `accurate` (default) or `fast`. `fast` is noticeably weaker: on light-on-dark UIs such
@@ -29,7 +30,8 @@ When an app does expose its UI, `find` is faster and exact; `ocr` reads only wha
   `foreground` always brings the app forward for the capture, then restores.
 
 Windows and the screen are captured at a density of at least 2 pixels per point, so small text has a
-better chance. Lines come back in reading order (top to bottom, left to right). `confidence` is between
+better chance. Each entry has `text` (OCR has no labels), `confidence`, `frame`, `center`, and `windowCenter` with `--app`.
+Entries come back in reading order (top to bottom, left to right). `confidence` is between
 `0` and `1`.
 
 **Note:** very small or low-contrast text (single-digit buttons, thin glyphs) can be missed, and symbols
@@ -62,7 +64,7 @@ aux4 computer mac ocr --app Calculator --text "1,792"
 ```
 
 ```json
-{"app":"Calculator","height":408,"level":"accurate","lines":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
+{"app":"Calculator","height":408,"level":"accurate","matches":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
 ```
 
 ```bash
@@ -80,5 +82,5 @@ aux4 computer mac ocr --image receipt.png --text total
 ```
 
 ```json
-{"height":200,"level":"accurate","lines":[{"center":{"x":404,"y":149},"confidence":1,"frame":{"height":45.4,"width":208.7,"x":299.7,"y":126.3},"match":{"center":{"x":347.3,"y":149.9},"frame":{"height":43.5,"width":95.2,"x":299.7,"y":128.2}},"text":"Total: 1,792"}],"mode":"background","path":"receipt.png","scale":1,"source":"image","text":"total","width":600}
+{"height":200,"level":"accurate","matches":[{"center":{"x":404,"y":149},"confidence":1,"frame":{"height":45.4,"width":208.7,"x":299.7,"y":126.3},"match":{"center":{"x":347.3,"y":149.9},"frame":{"height":43.5,"width":95.2,"x":299.7,"y":128.2}},"text":"Total: 1,792"}],"mode":"background","path":"receipt.png","scale":1,"source":"image","text":"total","width":600}
 ```

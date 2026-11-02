@@ -162,12 +162,12 @@ jobs:
           OCR=""
           for value in "1,792" "1792"; do
             OCR=$(aux4 computer mac ocr --app Calculator --text "$value")
-            echo "$OCR" | jq -e '.lines | length > 0' > /dev/null && break
+            echo "$OCR" | jq -e '.matches | length > 0' > /dev/null && break
           done
           echo "$OCR" | tee "$RUNNER_TEMP/calculator-ocr.json"
-          if ! echo "$OCR" | jq -e '.lines | length > 0' > /dev/null; then
+          if ! echo "$OCR" | jq -e '.matches | length > 0' > /dev/null; then
             echo "::error::OCR did not find the 256x7 result in Calculator's window. OCR read:"
-            aux4 computer mac ocr --app Calculator | jq -c '[.lines[].text]'
+            aux4 computer mac ocr --app Calculator | jq -c '[.matches[].text]'
             exit 1
           fi
           # The AX element's frame in window coordinates: screen frame minus the window origin
@@ -176,10 +176,10 @@ jobs:
           echo "accessibility element: $ELEMENT"
           if ! echo "$OCR" | jq -e --argjson el "$ELEMENT" '
               ($el.center.x - $el.windowCenter.x) as $ox | ($el.center.y - $el.windowCenter.y) as $oy |
-              .lines[0].windowCenter as $c |
+              .matches[0].windowCenter as $c |
               $c.x >= ($el.frame.x - $ox) and $c.x <= ($el.frame.x - $ox + $el.frame.width) and
               $c.y >= ($el.frame.y - $oy) and $c.y <= ($el.frame.y - $oy + $el.frame.height)' > /dev/null; then
-            echo "::error::OCR windowCenter $(echo "$OCR" | jq -c '.lines[0].windowCenter') is outside the accessibility frame of the result"
+            echo "::error::OCR windowCenter $(echo "$OCR" | jq -c '.matches[0].windowCenter') is outside the accessibility frame of the result"
             exit 1
           fi
 

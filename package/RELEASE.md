@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.3.1
+
+- `ocr` returns its results as `matches` (the same key as `find`) instead of `lines`; each entry keeps its
+  `text`. No match is `"matches": []` with exit code `0`.
+
 ## 0.3.0
 
 ### `ocr`: read the text on screen
@@ -8,7 +13,7 @@ New `aux4 computer mac ocr` recognizes the text in pixels — the main display, 
 (`--app`, even when covered), or an existing PNG (`--image`, no Screen Recording needed) — on this Mac,
 with no network and nothing to download.
 
-- Each line has `text`, `confidence`, and a `frame`/`center` in screen points; with `--app` also a
+- Each recognized line has `text`, `confidence`, and a `frame`/`center` in screen points; with `--app` also a
   `windowCenter`, the coordinate space `click --app` uses, so an agent can click something it read.
 - `--text` keeps only the lines containing that text (case-insensitive, whitespace-tolerant) and adds a
   `match` with the position of just that text.

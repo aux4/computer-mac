@@ -1755,7 +1755,7 @@ func cmdOcr(_ args: [String]) async {
     out["height"] = round1(Double(image.height) / scale)
     out["scale"] = round1(scale)
     if !filter.isEmpty { out["text"] = filter }
-    out["lines"] = lines
+    out["matches"] = lines
     printJSON(out)
 }
 
