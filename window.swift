@@ -221,12 +221,21 @@ func cmdWindow(_ args: [String]) {
             if axBool(button, kAXEnabledAttribute) == false { return .unavailable("the window's close button is disabled") }
             let r = AXUIElementPerformAction(button, kAXPressAction as CFString)
             if r != .success { return .unavailable("AXPress on the close button failed (AXError \(r.rawValue))") }
+            // A sheet can take a moment to attach (and the window can briefly drop out of the
+            // app's window list meanwhile): only call it closed once it has stayed gone with no dialog.
             var dialog: DialogInfo? = nil
-            let closed = pollUntil(2.0) {
-                if !axWindows(target.axApp).contains(where: { CFEqual($0, window) }) { return true }
+            var goneSince: Date? = nil
+            pollUntil(3.0) {
                 dialog = findDialog(target)
-                return dialog != nil
-            } && dialog == nil
+                if dialog != nil { return true }
+                if axWindows(target.axApp).contains(where: { CFEqual($0, window) }) {
+                    goneSince = nil
+                    return false
+                }
+                if goneSince == nil { goneSince = Date() }
+                return Date().timeIntervalSince(goneSince!) >= 0.6
+            }
+            let closed = dialog == nil && !axWindows(target.axApp).contains(where: { CFEqual($0, window) })
             out["method"] = "AXPress"
             out["closed"] = closed
             if let d = dialog ?? (closed ? nil : findDialog(target)) {
