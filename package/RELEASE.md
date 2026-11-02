@@ -4,6 +4,10 @@
 
 - `ocr` returns its results as `matches` (the same key as `find`) instead of `lines`; each entry keeps its
   `text`. No match is `"matches": []` with exit code `0`.
+- Fix: on 1x (non-Retina) displays `ocr --app` and screen OCR reported positions at half their real
+  values. Capture now happens at the display's own density and is upscaled for recognition.
+- CI: the live gate also clicks Calculator's 7 key at the position `ocr` reports and checks that the
+  7 button was pressed.
 
 ## 0.3.0
 

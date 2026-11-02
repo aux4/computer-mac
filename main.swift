@@ -1541,18 +1541,30 @@ func loadPNG(_ path: String) -> CGImage? {
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
 }
 
-// backingScale is the pixel density of the screen a rect (in global screen points) sits on.
-func backingScale(for rect: CGRect) -> Double {
-    let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-    for screen in NSScreen.screens {
-        // NSScreen frames are bottom-left based; convert to the top-left global space CG uses.
-        let f = screen.frame
-        let topLeft = CGRect(x: f.origin.x, y: primaryHeight - f.origin.y - f.height, width: f.width, height: f.height)
-        if topLeft.contains(CGPoint(x: rect.midX, y: rect.midY)) {
-            return Double(screen.backingScaleFactor)
-        }
+// captureForOCR captures at the content's native pixel density (asking ScreenCaptureKit for more
+// pixels than the display has doesn't upscale: it pads, which would shift every position), then
+// upscales in software to at least 2 pixels per point, where recognition is more reliable.
+// Returns the image and its pixels per point.
+func captureForOCR(filter: SCContentFilter, size: CGSize) async throws -> (CGImage, Double) {
+    let native = max(Double(filter.pointPixelScale), 1)
+    let captured = try await captureImage(filter: filter,
+                                          width: Int((size.width * native).rounded()),
+                                          height: Int((size.height * native).rounded()))
+    // What was actually delivered, in case it differs from what was asked.
+    let actual = size.width > 0 ? Double(captured.width) / Double(size.width) : native
+    if actual >= 2 { return (captured, actual) }
+    let factor = 2 / actual
+    let w = Int((Double(captured.width) * factor).rounded())
+    let h = Int((Double(captured.height) * factor).rounded())
+    guard let context = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        return (captured, actual)
     }
-    return Double(NSScreen.main?.backingScaleFactor ?? 1)
+    context.interpolationQuality = .high
+    context.draw(captured, in: CGRect(x: 0, y: 0, width: w, height: h))
+    guard let upscaled = context.makeImage() else { return (captured, actual) }
+    return (upscaled, Double(w) / Double(size.width))
 }
 
 struct RecognizedLine {
@@ -1685,12 +1697,8 @@ func cmdOcr(_ args: [String]) async {
             guard let scWin = content.windows.first(where: { $0.windowID == win.id }) else {
                 fail("No capturable window found for app: \(appArg)")
             }
-            // Recognition is more reliable on dense pixels; capture at least 2x.
-            scale = max(backingScale(for: win.frame), 2)
             do {
-                image = try await captureImage(filter: SCContentFilter(desktopIndependentWindow: scWin),
-                                               width: Int((win.frame.width * scale).rounded()),
-                                               height: Int((win.frame.height * scale).rounded()))
+                (image, scale) = try await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size)
             } catch {
                 fail("Failed to capture window for app '\(appArg)': \(error.localizedDescription)")
             }
@@ -1705,11 +1713,8 @@ func cmdOcr(_ args: [String]) async {
                 fail("No display found to capture")
             }
             let bounds = CGDisplayBounds(display.displayID)
-            scale = max(backingScale(for: bounds), 2)
             do {
-                image = try await captureImage(filter: SCContentFilter(display: display, excludingWindows: []),
-                                               width: Int((bounds.width * scale).rounded()),
-                                               height: Int((bounds.height * scale).rounded()))
+                (image, scale) = try await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size)
             } catch {
                 fail("Failed to capture the main display: \(error.localizedDescription)")
             }

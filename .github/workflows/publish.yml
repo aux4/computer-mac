@@ -183,6 +183,22 @@ jobs:
             exit 1
           fi
 
+          # A point OCR reports must hit the right control: click the "7" key at its OCR windowCenter
+          # and check that Accessibility pressed the button labelled "7".
+          KEY=$(aux4 computer mac ocr --app Calculator --text 7 | jq -c '[.matches[] | select(.text == "7")] | max_by(.windowCenter.y) | .windowCenter // empty')
+          echo "OCR located the 7 key at $KEY"
+          if [ -z "$KEY" ]; then
+            echo "::error::OCR did not find the 7 key. OCR read:"
+            aux4 computer mac ocr --app Calculator | jq -c '[.matches[].text]'
+            exit 1
+          fi
+          PRESSED=$(aux4 computer mac click --app Calculator --x "$(echo "$KEY" | jq .x)" --y "$(echo "$KEY" | jq .y)" --mode background)
+          echo "$PRESSED"
+          if ! echo "$PRESSED" | jq -e '.element.label == "7"' > /dev/null; then
+            echo "::error::clicking the OCR position of the 7 key did not press the 7 button"
+            exit 1
+          fi
+
           aux4 computer mac open "TextEdit"
           sleep 1
           aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
