@@ -128,8 +128,8 @@ jobs:
           # Calculator's AXButton labels differ by macOS version (e.g. "Multiply"
           # on macOS 26, a glyph or lowercase word on older ones), so each key
           # lists its candidates separated by "|".
-          for keys in "All Clear|Clear|AC|C" "2" "5" "6" "Multiply|multiply|×|*" "7" "Equals|equals|="; do
-            REF=""
+          press() {
+            local keys="$1" REF=""
             IFS='|' read -ra CANDIDATES <<< "$keys"
             for key in "${CANDIDATES[@]}"; do
               REF=$(aux4 computer mac find "$key" --role AXButton --app Calculator | jq -r '[.matches[] | select(.label == "'"$key"'")][0].ref // .matches[0].ref // empty')
@@ -142,7 +142,30 @@ jobs:
             fi
             aux4 computer mac click --element "$REF" --app Calculator
             sleep 0.3
+          }
+          for keys in "All Clear|Clear|AC|C" "2" "5" "6" "Multiply|multiply|×|*" "7"; do
+            press "$keys"
           done
+
+          # wait must notice the result appear: start it before "=" is pressed. Its text match
+          # ignores commas, so 1792 also matches a grouped "1,792".
+          aux4 computer mac wait --app Calculator --text 1792 --timeout 10s > "$RUNNER_TEMP/wait-calculator.json" 2> "$RUNNER_TEMP/wait-calculator.err" &
+          WAIT_PID=$!
+          sleep 1.5
+          press "Equals|equals|="
+          WAIT_RC=0; wait "$WAIT_PID" || WAIT_RC=$?
+          cat "$RUNNER_TEMP/wait-calculator.json" "$RUNNER_TEMP/wait-calculator.err"
+          if [ "$WAIT_RC" != "0" ] || ! jq -e '.waited < 10 and .waited >= 1 and (.matches | length > 0) and (.source == "ax" or .source == "ocr")' "$RUNNER_TEMP/wait-calculator.json" > /dev/null; then
+            echo "::error::wait --app Calculator --text 1792 did not return the result before its timeout (exit $WAIT_RC)"
+            exit 1
+          fi
+          # Once shown, the result must not be reported as gone, and the OCR-only path must see it too.
+          if aux4 computer mac wait --app Calculator --text 1792 --gone true --timeout 1s 2> "$RUNNER_TEMP/wait-gone.err"; then
+            echo "::error::wait --gone reported the shown result as gone"
+            exit 1
+          fi
+          aux4 computer mac wait --app Calculator --text 1792 --source ocr --timeout 10s | tee "$RUNNER_TEMP/wait-calculator-ocr.json" | jq -e '.source == "ocr" and (.matches | length > 0)' > /dev/null
+
 
           sleep 0.5
           # Older Calculators show "1792"; newer ones group digits as "1,792".
@@ -200,9 +223,20 @@ jobs:
           fi
 
           aux4 computer mac open "TextEdit"
+          # wait --app alone: TextEdit is running with an on-screen window.
+          aux4 computer mac wait --app TextEdit --timeout 20s | tee "$RUNNER_TEMP/wait-textedit-window.json" | jq -e '.source == "app" and (.matches | length > 0)' > /dev/null
+          sleep 1
+          # wait for the typed text: started before typing, so it has to see it arrive.
+          aux4 computer mac wait --app TextEdit --text "Hello from aux4/computer-mac CI" --timeout 10s > "$RUNNER_TEMP/wait-textedit.json" 2> "$RUNNER_TEMP/wait-textedit.err" &
+          WAIT_PID=$!
           sleep 1
           aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
-          sleep 0.5
+          WAIT_RC=0; wait "$WAIT_PID" || WAIT_RC=$?
+          cat "$RUNNER_TEMP/wait-textedit.json" "$RUNNER_TEMP/wait-textedit.err"
+          if [ "$WAIT_RC" != "0" ] || ! jq -e '.waited < 10 and (.matches | length > 0)' "$RUNNER_TEMP/wait-textedit.json" > /dev/null; then
+            echo "::error::wait --app TextEdit --text did not see the typed text before its timeout (exit $WAIT_RC)"
+            exit 1
+          fi
           TYPED=$(aux4 computer mac find "Hello from aux4/computer-mac CI" --app TextEdit)
           echo "$TYPED"
           if ! echo "$TYPED" | jq -e '.matches | length > 0' > /dev/null; then
@@ -231,6 +265,7 @@ jobs:
           path: |
             ${{ runner.temp }}/screenshots
             ${{ runner.temp }}/calculator-ocr.json
+            ${{ runner.temp }}/wait-*
           if-no-files-found: warn
 
 

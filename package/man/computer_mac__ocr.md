@@ -16,8 +16,9 @@ When an app does expose its UI, `find` is faster and exact; `ocr` reads only wha
 - **`--image`** — recognizes a PNG instead of capturing. Needs no Screen Recording permission.
   Positions are image pixels divided by `--scale` (default `1`; pass the `scale` from `screenshot` to
   get points).
-- **`--text`** — only returns the lines containing that text (none → `"matches": []`, exit `0`, like `find`), case-insensitively and ignoring whitespace
-  differences (recognition sometimes reads `1,792` as `1 ,792`). Each line also gets a `match` with the
+- **`--text`** — only returns the lines containing that text (none → `"matches": []`, exit `0`, like `find`), ignoring case, whitespace and commas
+  (recognition sometimes reads `1,792` as `1 ,792`, and apps differ on digit grouping, so `1792` matches
+  `1,792` and the other way round). Each line also gets a `match` with the
   `frame`/`center`/`windowCenter` of just the matched text, for clicking a word inside a longer line.
 - **`--level`** — `accurate` (default) or `fast`. `fast` is noticeably weaker: on light-on-dark UIs such
   as Calculator it can return nothing. Language correction is always on.

@@ -140,6 +140,62 @@
           }
         },
         {
+          "name": "wait",
+          "execute": [
+            "${packageDir}/aux4-computer-mac wait values(text, role, app, gone, source, timeout, interval)"
+          ],
+          "help": {
+            "text": "Wait until text, an element or an app window appears (or is gone), checking the accessibility tree first, then OCR",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to wait for in element labels/values or on the pixels (ignores case, whitespace and commas, so 1792 matches 1,792)",
+                "default": "",
+                "arg": true
+              },
+              {
+                "name": "role",
+                "text": "Only elements with this AX role, e.g. AXButton (accessibility only)",
+                "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App to watch (defaults to the frontmost app / the whole screen); alone, wait until it is running with an on-screen window",
+                "default": ""
+              },
+              {
+                "name": "gone",
+                "text": "true: wait until the text, element or app window is no longer there",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
+                ]
+              },
+              {
+                "name": "source",
+                "text": "auto (default): accessibility first, OCR of the app window (or screen) when accessibility has no match; ax or ocr: only that one",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "ax",
+                  "ocr"
+                ]
+              },
+              {
+                "name": "timeout",
+                "text": "How long to wait before failing, e.g. 500ms, 10s, 2m",
+                "default": "10s"
+              },
+              {
+                "name": "interval",
+                "text": "Pause between checks, e.g. 250ms, 1s (checks never overlap)",
+                "default": "500ms"
+              }
+            ]
+          }
+        },
+        {
           "name": "read",
           "execute": [
             "${packageDir}/aux4-computer-mac read values(app, depth)"

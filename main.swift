@@ -439,16 +439,22 @@ func cmdFind(_ args: [String]) {
             if !haystack.contains(text) { return }
         }
         if text.isEmpty && role.isEmpty { return }
-        var entry = nodeToJSON(node)
-        if let f = node.frame {
-            entry["center"] = ["x": f.origin.x + f.size.width / 2, "y": f.origin.y + f.size.height / 2]
-            if let o = windowOrigin {
-                entry["windowCenter"] = ["x": f.origin.x + f.size.width / 2 - o.x, "y": f.origin.y + f.size.height / 2 - o.y]
-            }
-        }
-        matches.append(entry)
+        matches.append(axMatchEntry(node, windowOrigin: windowOrigin))
     }
     printJSON(["app": name, "matches": matches])
+}
+
+// axMatchEntry is one element of find's (and wait's) "matches": the node plus its center in screen
+// points and, with --app, windowCenter relative to the app's front window.
+func axMatchEntry(_ node: AXNode, windowOrigin: CGPoint?) -> [String: Any] {
+    var entry = nodeToJSON(node)
+    if let f = node.frame {
+        entry["center"] = ["x": f.origin.x + f.size.width / 2, "y": f.origin.y + f.size.height / 2]
+        if let o = windowOrigin {
+            entry["windowCenter"] = ["x": f.origin.x + f.size.width / 2 - o.x, "y": f.origin.y + f.size.height / 2 - o.y]
+        }
+    }
+    return entry
 }
 
 // MARK: - action modes (background by default, real input as fallback)
@@ -505,6 +511,12 @@ func captureUserState() -> UserState {
 
 func spinRunLoop(_ seconds: Double) {
     RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+}
+
+// spinRunLoop(until:) turns the run loop until the date has really passed (run(until:) returns
+// early whenever a source fires).
+func spinRunLoop(until date: Date) {
+    while Date() < date { RunLoop.current.run(until: date) }
 }
 
 func isFrontmost(_ pid: pid_t) -> Bool {
@@ -1518,13 +1530,14 @@ func round1(_ v: Double) -> NSNumber {
     return NSDecimalNumber(string: String(format: "%.1f", v))
 }
 
-// textRange finds the filter in a recognized line, case-insensitively and ignoring whitespace
-// differences (recognition sometimes splits "1,792" as "1 ,792").
+// textRange finds the filter in a text, case-insensitively and ignoring whitespace and commas
+// (recognition sometimes splits "1,792" as "1 ,792", and apps differ on digit grouping, so
+// "1792" and "1,792" match each other).
 func textRange(of filter: String, in text: String) -> Range<String.Index>? {
     if let r = text.range(of: filter, options: [.caseInsensitive]) { return r }
-    let chars = filter.filter { !$0.isWhitespace }.map { NSRegularExpression.escapedPattern(for: String($0)) }
+    let chars = filter.filter { !$0.isWhitespace && $0 != "," }.map { NSRegularExpression.escapedPattern(for: String($0)) }
     if chars.isEmpty { return nil }
-    return text.range(of: chars.joined(separator: "\\s*"), options: [.caseInsensitive, .regularExpression])
+    return text.range(of: chars.joined(separator: "[\\s,]*"), options: [.caseInsensitive, .regularExpression])
 }
 
 func rectJSON(_ r: CGRect) -> [String: Any] {
@@ -1572,9 +1585,12 @@ struct RecognizedLine {
     let confidence: Double
     let box: CGRect                  // in image pixels, top-left origin
     let matchBox: CGRect?            // the --text substring, in image pixels
+    let matched: Bool                // contains the filter (always true without keepUnmatched)
 }
 
-func recognizeText(_ image: CGImage, level: String, languages: [String], filter: String) -> [RecognizedLine] {
+// With keepUnmatched, lines that don't contain the filter are returned too (matchBox nil,
+// matched false) — 'wait' uses them to report what it saw.
+func recognizeText(_ image: CGImage, level: String, languages: [String], filter: String, keepUnmatched: Bool = false) -> [RecognizedLine] {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = level == "fast" ? .fast : .accurate
     request.usesLanguageCorrection = true
@@ -1603,13 +1619,18 @@ func recognizeText(_ image: CGImage, level: String, languages: [String], filter:
         guard let candidate = observation.topCandidates(1).first else { continue }
         let text = candidate.string
         var matchBox: CGRect? = nil
+        var matched = true
         if !filter.isEmpty {
-            guard let range = textRange(of: filter, in: text) else { continue }
-            if let sub = try? candidate.boundingBox(for: range) {
-                matchBox = toPixels(sub.boundingBox)
+            if let range = textRange(of: filter, in: text) {
+                if let sub = try? candidate.boundingBox(for: range) {
+                    matchBox = toPixels(sub.boundingBox)
+                }
+            } else {
+                if !keepUnmatched { continue }
+                matched = false
             }
         }
-        lines.append(RecognizedLine(text: text, confidence: Double(candidate.confidence), box: toPixels(observation.boundingBox), matchBox: matchBox))
+        lines.append(RecognizedLine(text: text, confidence: Double(candidate.confidence), box: toPixels(observation.boundingBox), matchBox: matchBox, matched: matched))
     }
     // Reading order: top to bottom, then left to right for lines on the same row.
     lines.sort { a, b in
@@ -1617,6 +1638,26 @@ func recognizeText(_ image: CGImage, level: String, languages: [String], filter:
         return a.box.minX < b.box.minX
     }
     return lines
+}
+
+// ocrEntry is one element of ocr's (and wait's) "matches": text, confidence, frame/center in screen
+// points, windowCenter with --app, and "match" for the --text substring.
+func ocrEntry(_ line: RecognizedLine, toPoints: (CGRect) -> CGRect, windowOrigin: CGPoint?) -> [String: Any] {
+    let frame = toPoints(line.box)
+    var entry: [String: Any] = [
+        "text": line.text,
+        "confidence": NSDecimalNumber(string: String(format: "%.2f", line.confidence)),
+        "frame": rectJSON(frame),
+        "center": centerJSON(frame)
+    ]
+    if let o = windowOrigin { entry["windowCenter"] = centerJSON(frame, minus: o) }
+    if let m = line.matchBox {
+        let mf = toPoints(m)
+        var match: [String: Any] = ["frame": rectJSON(mf), "center": centerJSON(mf)]
+        if let o = windowOrigin { match["windowCenter"] = centerJSON(mf, minus: o) }
+        entry["match"] = match
+    }
+    return entry
 }
 
 func cmdOcr(_ args: [String]) async {
@@ -1739,21 +1780,7 @@ func cmdOcr(_ args: [String]) async {
 
     var lines: [[String: Any]] = []
     for line in recognizeText(image, level: levelArg, languages: languages, filter: filter) {
-        let frame = toPoints(line.box)
-        var entry: [String: Any] = [
-            "text": line.text,
-            "confidence": NSDecimalNumber(string: String(format: "%.2f", line.confidence)),
-            "frame": rectJSON(frame),
-            "center": centerJSON(frame)
-        ]
-        if let o = windowOrigin { entry["windowCenter"] = centerJSON(frame, minus: o) }
-        if let m = line.matchBox {
-            let mf = toPoints(m)
-            var match: [String: Any] = ["frame": rectJSON(mf), "center": centerJSON(mf)]
-            if let o = windowOrigin { match["windowCenter"] = centerJSON(mf, minus: o) }
-            entry["match"] = match
-        }
-        lines.append(entry)
+        lines.append(ocrEntry(line, toPoints: toPoints, windowOrigin: windowOrigin))
     }
 
     out["width"] = round1(Double(image.width) / scale)
@@ -1762,6 +1789,302 @@ func cmdOcr(_ args: [String]) async {
     if !filter.isEmpty { out["text"] = filter }
     out["matches"] = lines
     printJSON(out)
+}
+
+// MARK: - wait (poll until text / an element / an app window appears, or is gone)
+
+// parseDuration accepts 500ms, 10s, 2m, 1.5s or a bare number of seconds.
+func parseDuration(_ raw: String, name: String) -> Double {
+    let s = raw.trimmingCharacters(in: .whitespaces).lowercased()
+    var number = s
+    var factor = 1.0
+    if s.hasSuffix("ms") { number = String(s.dropLast(2)); factor = 0.001 }
+    else if s.hasSuffix("s") { number = String(s.dropLast(1)) }
+    else if s.hasSuffix("m") { number = String(s.dropLast(1)); factor = 60 }
+    guard let v = Double(number.trimmingCharacters(in: .whitespaces)), v >= 0, v.isFinite else {
+        fail("Invalid --\(name) '\(raw)': use e.g. 500ms, 10s or 2m")
+    }
+    return v * factor
+}
+
+func round2(_ v: Double) -> NSNumber {
+    return NSDecimalNumber(string: String(format: "%.2f", v))
+}
+
+func failJSON(_ obj: [String: Any], code: Int32 = 1) -> Never {
+    if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]) {
+        FileHandle.standardError.write(data)
+        FileHandle.standardError.write("\n".data(using: .utf8)!)
+    } else {
+        FileHandle.standardError.write("{\"error\":\"internal: failed to encode error\"}\n".data(using: .utf8)!)
+    }
+    exit(code)
+}
+
+// liveApp finds a running app by name on every call. NSWorkspace's list only refreshes when a run
+// loop turns, so an app that launched mid-wait is also looked up through the window server.
+func liveApp(named name: String) -> NSRunningApplication? {
+    if let app = findRunningApp(named: name), !app.isTerminated { return app }
+    let lower = name.lowercased()
+    guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return nil
+    }
+    for info in infoList {
+        let owner = (info[kCGWindowOwnerName as String] as? String ?? "").lowercased()
+        guard owner == lower || owner.contains(lower),
+              let pid = info[kCGWindowOwnerPID as String] as? Int,
+              let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { continue }
+        return app
+    }
+    return nil
+}
+
+// frontmostAppPid reads the focused app from Accessibility (NSWorkspace's goes stale without a run loop).
+func frontmostAppPid() -> pid_t? {
+    let system = AXUIElementCreateSystemWide()
+    var value: AnyObject?
+    if AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &value) == .success,
+       let v = value, CFGetTypeID(v) == AXUIElementGetTypeID() {
+        var pid: pid_t = 0
+        if AXUIElementGetPid(v as! AXUIElement, &pid) == .success { return pid }
+    }
+    return NSWorkspace.shared.frontmostApplication?.processIdentifier
+}
+
+struct WaitTick {
+    var present = false
+    var source = ""
+    var matches: [[String: Any]] = []
+    var appName: String? = nil
+    // Every planned check ran to the end: only then does "not found" count for --gone.
+    var complete = true
+    var seen: [String: Any] = [:]
+}
+
+func appendSeen(_ list: inout [String], _ text: String, limit: Int = 15) {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if t.isEmpty || list.count >= limit || list.contains(t) { return }
+    list.append(t.count > 80 ? String(t.prefix(80)) + "…" : t)
+}
+
+// axTick walks the app's tree like 'find', but stops at the deadline: an app that is busy (each
+// accessibility call can block until the messaging timeout) must not keep 'wait' past --timeout.
+func axTick(pid: pid_t, text: String, role: String, windowOrigin: CGPoint?, deadline: Date) -> ([[String: Any]], [String], Bool) {
+    let root = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(root, 1.0)
+    var matches: [[String: Any]] = []
+    var seen: [String] = []
+    var complete = true
+    let wantedRole = role.lowercased()
+    func visit(_ element: AXUIElement, ref: String, depth: Int) {
+        if Date() > deadline { complete = false; return }
+        let node = describeElement(element, ref: ref)
+        let roleMatches = wantedRole.isEmpty || node.role.lowercased() == wantedRole
+        // Menus are the same in every state; the summary is about the app's content.
+        if roleMatches && !node.role.hasPrefix("AXMenu") { appendSeen(&seen, node.value.isEmpty ? node.label : node.value) }
+        if roleMatches && (text.isEmpty || textRange(of: text, in: node.label + " " + node.value) != nil) {
+            matches.append(axMatchEntry(node, windowOrigin: windowOrigin))
+        }
+        if depth >= 30 { return }
+        for (i, child) in axChildren(element).enumerated() {
+            visit(child, ref: ref.isEmpty ? "\(i)" : "\(ref).\(i)", depth: depth + 1)
+        }
+    }
+    visit(root, ref: "", depth: 0)
+    return (matches, seen, complete)
+}
+
+// ocrTick reads the app's window (or the main display) in the background only: a window that isn't
+// on screen is simply not seen this tick — wait never brings an app forward.
+func ocrTick(app: NSRunningApplication?, text: String) async -> ([[String: Any]], [String])? {
+    let content: SCShareableContent
+    do {
+        content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    } catch {
+        return nil
+    }
+    var image: CGImage
+    var scale = 1.0
+    var origin = CGPoint.zero
+    var windowOrigin: CGPoint? = nil
+    if let app = app {
+        guard let win = frontWindow(pid: app.processIdentifier),
+              let scWin = content.windows.first(where: { $0.windowID == win.id }),
+              let captured = try? await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size) else {
+            return nil
+        }
+        (image, scale) = captured
+        origin = win.frame.origin
+        windowOrigin = win.frame.origin
+    } else {
+        let mainID = CGMainDisplayID()
+        guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else { return nil }
+        let bounds = CGDisplayBounds(display.displayID)
+        guard let captured = try? await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size) else {
+            return nil
+        }
+        (image, scale) = captured
+        origin = bounds.origin
+    }
+    func toPoints(_ r: CGRect) -> CGRect {
+        return CGRect(x: origin.x + r.origin.x / scale, y: origin.y + r.origin.y / scale,
+                      width: r.width / scale, height: r.height / scale)
+    }
+    var matches: [[String: Any]] = []
+    var seen: [String] = []
+    for line in recognizeText(image, level: "accurate", languages: [], filter: text, keepUnmatched: true) {
+        appendSeen(&seen, line.text)
+        if line.matched { matches.append(ocrEntry(line, toPoints: toPoints, windowOrigin: windowOrigin)) }
+    }
+    return (matches, seen)
+}
+
+func cmdWait(_ args: [String]) async {
+    let text = argAt(args, 0)
+    let role = argAt(args, 1)
+    let appArg = argAt(args, 2)
+    let goneArg = argAt(args, 3).lowercased()
+    let sourceArg = argAt(args, 4).isEmpty ? "auto" : argAt(args, 4).lowercased()
+    let timeout = parseDuration(argAt(args, 5).isEmpty ? "10s" : argAt(args, 5), name: "timeout")
+    let interval = parseDuration(argAt(args, 6).isEmpty ? "500ms" : argAt(args, 6), name: "interval")
+
+    guard goneArg.isEmpty || goneArg == "true" || goneArg == "false" else {
+        fail("Invalid --gone '\(argAt(args, 3))': use true or false")
+    }
+    let gone = goneArg == "true"
+    guard ["auto", "ax", "ocr"].contains(sourceArg) else {
+        fail("Invalid --source '\(argAt(args, 4))': use auto, ax or ocr")
+    }
+    if text.isEmpty && role.isEmpty && appArg.isEmpty {
+        fail("Nothing to wait for: give --text (optionally with --role), --role, or --app")
+    }
+    if !role.isEmpty && sourceArg == "ocr" {
+        fail("--role needs the accessibility tree: use --source auto or ax with --role")
+    }
+    let watchesText = !text.isEmpty || !role.isEmpty
+    // With --role only the accessibility tree can match; OCR knows nothing about roles.
+    let useAX = watchesText && sourceArg != "ocr"
+    var useOCR = watchesText && role.isEmpty && sourceArg != "ax"
+    if useAX { requireAccessibility() }
+    if sourceArg == "ocr" { requireScreenRecording() }
+    var notes: [String] = []
+    if useOCR && sourceArg == "auto" && !screenRecordingGranted() {
+        useOCR = false
+        notes.append("Screen Recording not granted: OCR skipped, accessibility only")
+    }
+
+    var condition: [String: Any] = ["gone": gone, "source": sourceArg]
+    if !text.isEmpty { condition["text"] = text }
+    if !role.isEmpty { condition["role"] = role }
+    if !appArg.isEmpty { condition["app"] = appArg }
+
+    let start = Date()
+    // Grace for the last check to finish once it has started (one recognition pass).
+    let deadline = start.addingTimeInterval(timeout + 0.5)
+    var last = WaitTick()
+    while true {
+        var tick = WaitTick()
+        let app: NSRunningApplication? = appArg.isEmpty ? nil : liveApp(named: appArg)
+        let window: WindowInfo? = app.flatMap { frontWindow(pid: $0.processIdentifier) }
+        tick.appName = app?.localizedName
+        if !appArg.isEmpty {
+            tick.seen["running"] = app != nil
+            tick.seen["window"] = window != nil
+        }
+
+        if !watchesText {
+            tick.source = "app"
+            if let app = app, let win = window {
+                tick.present = true
+                tick.matches = [[
+                    "app": app.localizedName ?? appArg,
+                    "pid": Int(app.processIdentifier),
+                    "id": Int(win.id),
+                    "title": win.title,
+                    "frame": frameJSON(win.frame)
+                ]]
+            }
+        } else if appArg.isEmpty || app != nil {
+            var checked: [String] = []
+            if useAX, let pid = app?.processIdentifier ?? frontmostAppPid() {
+                checked.append("ax")
+                let (matches, seen, complete) = axTick(pid: pid, text: text, role: role, windowOrigin: window?.frame.origin, deadline: deadline)
+                tick.seen["ax"] = seen
+                if !complete { tick.complete = false }
+                if !matches.isEmpty {
+                    tick.present = true
+                    tick.source = "ax"
+                    tick.matches = matches
+                }
+            }
+            if !tick.present && useOCR && (app == nil || window != nil) {
+                if Date() >= deadline { tick.complete = false }
+            }
+            if !tick.present && useOCR && (app == nil || window != nil) && Date() < deadline {
+                checked.append("ocr")
+                if let (matches, seen) = await ocrTick(app: app, text: text) {
+                    tick.seen["ocr"] = seen
+                    if !matches.isEmpty {
+                        tick.present = true
+                        tick.source = "ocr"
+                        tick.matches = matches
+                    }
+                } else {
+                    tick.complete = false
+                }
+            }
+            if !tick.present { tick.source = checked.isEmpty ? (useAX ? "ax" : "ocr") : checked.joined(separator: "+") }
+        } else {
+            tick.source = useAX ? (useOCR ? "ax+ocr" : "ax") : "ocr"
+        }
+        last = tick
+
+        let elapsed = Date().timeIntervalSince(start)
+        if gone ? (!tick.present && tick.complete) : tick.present {
+            var out: [String: Any] = ["waited": round2(elapsed), "source": tick.source, "matches": gone ? [] : tick.matches]
+            if let name = tick.appName { out["app"] = name }
+            if !notes.isEmpty { out["notes"] = notes }
+            printJSON(out)
+            return
+        }
+        if elapsed >= timeout { break }
+        // Ticks never overlap: the next one starts an interval after this one finished.
+        // RunLoop.run(until:) returns early whenever a source fires, so keep turning it until the
+        // pause is really over (turning it also keeps NSWorkspace's app list fresh).
+        let resume = Date().addingTimeInterval(min(interval, max(timeout - elapsed, 0)))
+        spinRunLoop(until: resume)
+    }
+
+    let waited = Date().timeIntervalSince(start)
+    var what: String
+    if !text.isEmpty {
+        what = "text '\(text)'" + (role.isEmpty ? "" : " (\(role))")
+    } else if !role.isEmpty {
+        what = "an element with role \(role)"
+    } else {
+        what = "a window of \(appArg)"
+    }
+    if watchesText && !appArg.isEmpty { what += " in \(appArg)" }
+    let timeoutText = argAt(args, 5).isEmpty ? "10s" : argAt(args, 5)
+    var seen = last.seen
+    if gone {
+        seen["present"] = last.matches.prefix(5).map { m -> String in
+            (m["text"] as? String) ?? (m["title"] as? String).map { "window '\($0)'" } ?? {
+                let v = m["value"] as? String ?? ""
+                return v.isEmpty ? (m["label"] as? String ?? "") : v
+            }()
+        }
+        seen["source"] = last.source
+    }
+    var err: [String: Any] = [
+        "error": "Timed out after \(timeoutText) waiting for \(what) to \(gone ? "disappear" : "appear")",
+        "condition": condition,
+        "timeout": round2(timeout),
+        "waited": round2(waited),
+        "seen": seen
+    ]
+    if !notes.isEmpty { err["notes"] = notes }
+    failJSON(err)
 }
 
 // MARK: - entrypoint
@@ -1797,6 +2120,9 @@ case "screenshot":
 case "ocr":
     _ = NSApplication.shared
     await cmdOcr(rest)
+case "wait":
+    _ = NSApplication.shared
+    await cmdWait(rest)
 case "clipboard-read": cmdClipboardRead()
 case "clipboard-copy": cmdClipboardCopy(rest)
 case "clipboard-paste": cmdClipboardPaste(rest)

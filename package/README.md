@@ -1,7 +1,7 @@
 # aux4/computer-mac
 
 Computer-use for AI agents on macOS. A native Swift CLI (no Python/Node/cliclick dependency) that lets an
-agent see the screen and act on it: take screenshots, read the text on screen (OCR), read the accessibility tree, find and click UI
+agent see the screen and act on it: take screenshots, read the text on screen (OCR), wait for something to appear, read the accessibility tree, find and click UI
 elements, type text, press keyboard shortcuts, scroll, drag, control the clipboard, and manage apps and
 windows. All commands print JSON to stdout.
 
@@ -122,7 +122,7 @@ aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [
 front window (`--app`, even when covered), or in an existing PNG (`--image`, no Screen Recording needed).
 Each line of text is an entry in `matches` (the same key as `find`) with `text`, `confidence` (`0`–`1`),
 a `frame` and a `center` in screen points, plus a `windowCenter` with `--app`. `--text` keeps only the
-lines containing that text (case-insensitive, whitespace-tolerant; no match is an empty `matches` array,
+lines containing that text (ignoring case, whitespace and commas, so `1792` matches `1,792`; no match is an empty `matches` array,
 not an error) and adds a `match` with the position of just that text.
 
 ```bash
@@ -136,6 +136,32 @@ aux4 computer mac ocr --app Calculator --text "1,792"
 **Note:** very small or low-contrast text can be missed or misread, and `--level fast` is much weaker
 than the default `accurate` (on light-on-dark UIs it may find nothing). Check `confidence`, and prefer
 `find` when the app exposes the element.
+
+### Waiting for something to appear
+
+```bash
+aux4 computer mac wait [--text "1792"] [--role AXButton] [--app "Calculator"] [--gone true] [--source auto|ax|ocr] [--timeout 10s] [--interval 500ms]
+```
+
+`wait` blocks until text or an element appears — checking the app's accessibility tree first, then
+its window's pixels with OCR when the tree has no match — or, with `--app` alone, until the app has an
+on-screen window. `--gone true` waits until it's no longer there. It returns as soon as the condition
+holds, with how long it `waited`, the `source` that saw it (`ax`, `ocr` or `app`) and the same `matches`
+as `find`/`ocr`/`windows`, ready for `click`. Text matching ignores case, whitespace and commas, so
+`1792` matches `1,792`.
+
+```bash
+aux4 computer mac wait --app Calculator --text 1792
+```
+
+```json
+{"app":"Calculator","matches":[{"center":{"x":645,"y":511},"label":"Edit field","ref":"0.0.0.0.1.0.0.0.0.0","role":"AXStaticText","value":"1,792","windowCenter":{"x":183,"y":112}}],"source":"ax","waited":1.7}
+```
+
+On timeout (`--timeout` takes `500ms`, `10s`, `2m`; default `10s`) it exits `1` with a JSON error on stderr
+naming the condition and what it saw on the last check (the first texts from accessibility and OCR,
+and whether the app was running with a window), so an agent can tell a wrong guess from a slow app.
+`wait` only reads: it never moves the cursor or brings an app forward.
 
 ### Reading the UI
 

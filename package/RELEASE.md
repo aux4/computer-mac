@@ -1,5 +1,32 @@
 # Release Notes
 
+## 0.4.0
+
+### `wait`: block until something appears (or is gone)
+
+New `aux4 computer mac wait` returns as soon as a condition holds, instead of an agent sleeping and
+re-checking:
+
+- `--text` (optionally `--role`): an element or text appears. Each check reads the accessibility tree
+  first, then the app's window (or the screen) with OCR if the tree has no match. `--source ax|ocr`
+  forces one.
+- `--app` alone: the app is running with an on-screen window.
+- `--gone true`: wait until it's no longer there.
+- `--timeout` (`500ms`, `10s`, `2m`; default `10s`) and `--interval` (default `500ms`; checks never overlap).
+- Success prints `waited`, `source` (`ax`/`ocr`/`app`) and the same `matches` as `find`/`ocr`/`windows`.
+  Timeout exits `1` with a JSON error naming the condition and what was seen on the last check.
+- Read-only: never moves the cursor or brings an app forward.
+
+### `ocr`
+
+- `--text` also ignores commas, so `1792` matches `1,792` (and `1,792` matches `1792`), the same
+  matching `wait` uses.
+
+### Build
+
+- The live UI publish gate starts `wait --app Calculator --text 1792` before pressing `=` and checks it
+  returns well before its timeout; it also waits for text typed into TextEdit.
+
 ## 0.3.1
 
 - `ocr` returns its results as `matches` (the same key as `find`) instead of `lines`; each entry keeps its

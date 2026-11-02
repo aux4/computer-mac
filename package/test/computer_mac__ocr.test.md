@@ -84,6 +84,16 @@ aux4 computer mac ocr --image fixtures/ocr-sample.png --text "1,792" | jq '.matc
 true
 ```
 
+### should ignore commas and whitespace, so 1792 matches 1,792
+
+```execute
+aux4 computer mac ocr --image fixtures/ocr-sample.png --text "1792" | jq -c '[.matches[] | {text, hasMatch: (.match != null)}]'
+```
+
+```expect
+[{"text":"Total: 1,792","hasMatch":true}]
+```
+
 ### should return an empty matches array when nothing matches
 
 ```execute
