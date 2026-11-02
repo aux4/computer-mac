@@ -8,10 +8,8 @@ every action is recorded in an action log that a stop switch can halt at once.
 
 It is built to **work alongside the person using the Mac**: actions run in the background by default —
 on an app that isn't in front, without moving the mouse cursor or changing the frontmost app — and fall
-back to real input only when the background isn't possible.
-
-Agents get the method in-context from the bundled AI skill: `aux4 ai skill computer-mac prompt` (see
-[AI skill](#ai-skill)).
+back to real input only when the background isn't possible. The package includes an AI skill for using it
+this way.
 
 This package is **darwin-only** (macOS). It ships native binaries for `darwin/arm64` and `darwin/amd64`.
 
@@ -397,17 +395,15 @@ aux4 computer mac clipboard paste --text "replaced via agent"
 
 ## AI skill
 
-The package ships an AI skill with the method an agent should follow — state, find, OCR fallback,
-`screenshot --annotate` for vision, act by ref / menu / set / select, wait — plus what works in the background and
-when the foreground fallback happens, coordinates, the stop switch and log, permissions and troubleshooting.
-
 ```bash
 aux4 ai skill computer-mac prompt
 ```
 
-It works on its own; when `aux4/ai-skill` is installed it is listed by `aux4 ai skill list` next to the other
-skills, which is how agents built on `aux4/ai-agent` discover it. For tools that read `SKILL.md` folders,
-export it: `aux4 ai skill export computer-mac --format skill`.
+The methodology tells agents to start from `state`, find elements with `find` (and `ocr` when the text isn't in the
+accessibility tree), look with `screenshot --annotate` when they need to see the layout, act by element ref, menu
+path, `set` and `select` rather than coordinates and keystrokes, and `wait` for the result instead of sleeping; what
+works in the background and when the foreground fallback happens; the coordinate rules; the stop switch and action
+log; permissions; and troubleshooting.
 
 ## Output and errors
 

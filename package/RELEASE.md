@@ -11,8 +11,7 @@
 - `quit` (with `--force`, `--timeout`): reports a save dialog instead of quitting; never force-quits Finder or
   quits session processes. `hide` / `unhide` without activating anything.
 - New commands are recorded in the action log (`window move`, ...) and refused while the stop switch is on.
-- AI skill `computer-mac` (`aux4 ai skill computer-mac prompt`): the agent method for this package.
-  Works on its own; with `aux4/ai-skill` installed it is listed by `aux4 ai skill list`.
+- AI skill `computer-mac` (`aux4 ai skill computer-mac prompt`): the method for agents using this package.
 
 ## 0.5.1
 

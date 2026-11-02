@@ -4,8 +4,6 @@ Prints the `computer-mac` method for agents as markdown: the state, find, ocr, a
 commands, background limits and fallbacks, coordinates, safety (stop switch, action log, never quitting the person's
 apps), permissions and troubleshooting. It only prints text.
 
-To hand it to an agent that reads `SKILL.md` folders, export it: `aux4 ai skill export computer-mac --format skill`.
-
 #### Usage
 
 ```bash
