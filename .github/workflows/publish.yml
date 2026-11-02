@@ -64,14 +64,33 @@ jobs:
           command: test
           build_command: aux4 builder darwin
 
+      # The Swift binaries can only be built on macOS, but the publish step of
+      # aux4/action runs in Docker, which macOS runners don't have. Hand the
+      # tested binaries to the Linux publish job.
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: package/dist
+          if-no-files-found: error
+
   publish:
     needs: [test-darwin]
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: package/dist
+
+      - name: Restore executable bit
+        run: chmod +x package/dist/darwin/*/aux4-computer-mac
 
       - name: Mint prod hub publish token
         id: mint
@@ -105,7 +124,6 @@ jobs:
         with:
           command: publish
           level: ${{ inputs.level || 'patch' }}
-          build_command: aux4 builder all
           # dev -> minted dev token; main -> minted prod token
           aux4_token: ${{ github.ref_name == 'dev' && steps.devmint.outputs.token || steps.mint.outputs.token }}
           # dev -> dev hub registry; main -> default (prod) hub
