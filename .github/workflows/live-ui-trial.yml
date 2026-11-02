@@ -88,7 +88,7 @@ jobs:
           done
 
           sleep 0.5
-          # Older Calculators show "1792", newer ones group digits as "1,792".
+          # Older Calculators show "1792"; newer ones group digits as "1,792".
           RESULT=$(aux4 computer mac find "1,792" --app Calculator)
           if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
             RESULT=$(aux4 computer mac find "1792" --app Calculator)
