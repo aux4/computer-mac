@@ -349,23 +349,24 @@ jobs:
           cm window close --app TextEdit --title "$W" | check window-close '.closed == true and .after == null'
           cm window list TextEdit | check window-closed "[.windows[] | select(.title | test(\"$W\"))] | length == 0"
 
-          # quit with an unsaved document: TextEdit asks; Delete lets it quit.
+          # quit with an unsaved document: closing it opens the "keep this document?" sheet, which keeps
+          # TextEdit from quitting; quit reports it, Delete answers it, then TextEdit quits.
           cm menu --app TextEdit --path "File > New" > /dev/null
           for i in $(seq 1 25); do
             [ "$(cm window list TextEdit | jq '[.windows[] | select(.subrole == null)] | length')" -gt 0 ] && break
             sleep 0.2
           done
-          cm type "Unsaved by aux4/computer-mac CI" --app TextEdit | check type-unsaved '.mode == "background" or .mode == "foreground"'
+          cm type "Unsaved by aux4/computer-mac CI" --app TextEdit | check type-unsaved '.typed > 0'
           cm wait --app TextEdit --text "Unsaved by aux4/computer-mac CI" --source ax --timeout 10s > /dev/null
+          cm window close --app TextEdit | check close-unsaved '.closed == false and .dialog != null and (.note | test("dialog --app"))'
           if cm quit Finder --force true 2> "$T/quit-finder.err"; then echo "::error::force-quit Finder was not refused"; exit 1; fi
-          cm quit TextEdit --timeout 10s | check quit '.method == "terminate" and .mode == "background"'
-          if jq -e '.terminated == false' "$T/quit.json" > /dev/null; then
-            jq -e '.dialog.buttons | length > 0' "$T/quit.json" > /dev/null || { echo "::error::quit did not report the dialog"; exit 1; }
-            BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' "$T/quit.json")
-            if [ -z "$BUTTON" ]; then echo "::error::no Delete/Don't Save button: $(jq -c '[.dialog.buttons[].title]' "$T/quit.json")"; exit 1; fi
-            cm dialog --app TextEdit --press "$BUTTON" --mode background | tee "$T/quit-dialog.json"
-          else
-            echo "::error::TextEdit quit without asking about the unsaved document"; exit 1
+          cm quit TextEdit --timeout 10s | check quit-blocked '.terminated == false and (.dialog.buttons | length > 0) and (.note | test("dialog --app"))'
+          BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' "$T/quit-blocked.json")
+          if [ -z "$BUTTON" ]; then echo "::error::no Delete/Don't Save button: $(jq -c '[.dialog.buttons[].title]' "$T/quit-blocked.json")"; exit 1; fi
+          cm dialog --app TextEdit --press "$BUTTON" --mode background | check quit-delete ".pressed == \"$BUTTON\" and .closed == true"
+          sleep 0.5
+          if [ "$(cm apps | jq '[.apps[] | select(.name == "TextEdit")] | length')" -gt 0 ]; then
+            cm quit TextEdit --timeout 10s | check quit '.terminated == true and .method == "terminate" and .mode == "background"'
           fi
           for i in $(seq 1 50); do
             [ "$(cm apps | jq '[.apps[] | select(.name == "TextEdit")] | length')" -eq 0 ] && break

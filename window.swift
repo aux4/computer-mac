@@ -312,7 +312,7 @@ func cmdQuit(_ args: [String]) {
     let pid = app.processIdentifier
     let target = Target(app: app, name: name, pid: pid, axApp: AXUIElementCreateApplication(pid), explicit: true)
     AXUIElementSetMessagingTimeout(target.axApp, 1.0)
-    let hadDialog = findDialog(target).map { $0.element }
+    let hadDialog = findDialog(target) != nil
     let start = Date()
     let sent = force ? app.forceTerminate() : app.terminate()
     if !sent && processAlive(pid) {
@@ -323,8 +323,9 @@ func cmdQuit(_ args: [String]) {
     while Date() < deadline {
         if !processAlive(pid) { break }
         // An app with unsaved changes answers a quit with a sheet or alert instead of quitting.
-        if !force, Date().timeIntervalSince(start) > 0.3, let d = findDialog(target),
-           hadDialog.map({ !CFEqual($0, d.element) }) ?? true {
+        // An open sheet or alert (new, or already there and blocking the quit) is reported for the
+        // caller to answer.
+        if !force, Date().timeIntervalSince(start) > 0.3, let d = findDialog(target) {
             dialog = d
             break
         }
@@ -339,7 +340,9 @@ func cmdQuit(_ args: [String]) {
     out["terminated"] = false
     if let d = dialog {
         out["dialog"] = dialogJSON(d)
-        out["note"] = "\(name) asked before quitting: answer with 'aux4 computer mac dialog --app \"\(name)\" --press <button>' (it quits after), or --press Cancel to keep it running"
+        out["note"] = hadDialog
+            ? "\(name) has a dialog open that keeps it from quitting: answer it with 'aux4 computer mac dialog --app \"\(name)\" --press <button>', then quit again"
+            : "\(name) asked before quitting: answer with 'aux4 computer mac dialog --app \"\(name)\" --press <button>' (it quits after), or --press Cancel to keep it running"
         printJSON(out)
         return
     }
