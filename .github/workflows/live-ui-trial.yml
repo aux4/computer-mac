@@ -42,7 +42,9 @@ jobs:
 
       - name: Install package locally
         shell: bash
-        run: aux4 aux4 releaser install --dir package --noBuild true
+        run: |
+          aux4 aux4 pkger install aux4/package-releaser
+          aux4 aux4 releaser install --dir package --noBuild true
 
       - name: Check permissions
         id: perms
