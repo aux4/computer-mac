@@ -19,7 +19,7 @@ aux4 computer mac clipboard copy --text "hello from test" | jq .
 ### should error with guidance, never a silent no-op
 
 ```execute
-aux4 computer mac clipboard copy
+AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac clipboard copy
 ```
 
 ```error:partial

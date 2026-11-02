@@ -5,7 +5,7 @@
 ### should error with guidance, never a silent no-op
 
 ```execute
-aux4 computer mac shortcut "cmd+c"
+AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac shortcut "cmd+c"
 ```
 
 ```error:partial

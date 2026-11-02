@@ -5,7 +5,7 @@
 ### should error with guidance, never a silent no-op
 
 ```execute
-aux4 computer mac type "hello"
+AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 aux4 computer mac type "hello"
 ```
 
 ```error:partial

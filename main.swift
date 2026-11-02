@@ -46,10 +46,18 @@ func parseInt(_ s: String, default def: Int = 0) -> Int {
 // MARK: - Permission helpers
 
 func accessibilityGranted() -> Bool {
+    if permissionsDeniedForTesting() { return false }
     return AXIsProcessTrusted()
 }
 
+// AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 makes every permission check fail, so the
+// missing-permission error paths can be tested without touching the real screen.
+func permissionsDeniedForTesting() -> Bool {
+    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_DENY_PERMISSIONS"] == "1"
+}
+
 func screenRecordingGranted() -> Bool {
+    if permissionsDeniedForTesting() { return false }
     return CGPreflightScreenCaptureAccess()
 }
 
@@ -529,26 +537,43 @@ func postShortcut(_ combo: String) -> String? {
         return "Unknown key: \(keyName)"
     }
 
+    // Modifiers are pressed as real key events (not just flags on the key) so system-wide
+    // hotkeys like cmd+space (Spotlight) fire, the same as a physical keyboard.
     var flags: CGEventFlags = []
+    var modifierKeys: [(CGKeyCode, CGEventFlags)] = []
     for modifier in parts.dropLast() {
         switch modifier {
-        case "cmd", "command": flags.insert(.maskCommand)
-        case "shift": flags.insert(.maskShift)
-        case "alt", "option": flags.insert(.maskAlternate)
-        case "ctrl", "control": flags.insert(.maskControl)
-        case "fn": flags.insert(.maskSecondaryFn)
+        case "cmd", "command": modifierKeys.append((55, .maskCommand))
+        case "shift": modifierKeys.append((56, .maskShift))
+        case "alt", "option": modifierKeys.append((58, .maskAlternate))
+        case "ctrl", "control": modifierKeys.append((59, .maskControl))
+        case "fn": modifierKeys.append((63, .maskSecondaryFn))
         default: return "Unknown modifier: \(modifier)"
         }
     }
 
-    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
-          let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) else {
+    let source = CGEventSource(stateID: .hidSystemState)
+    func post(_ code: CGKeyCode, _ isDown: Bool, _ eventFlags: CGEventFlags) -> Bool {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: isDown) else {
+            return false
+        }
+        event.flags = eventFlags
+        event.post(tap: .cghidEventTap)
+        usleep(10_000)
+        return true
+    }
+
+    for (code, flag) in modifierKeys {
+        flags.insert(flag)
+        if !post(code, true, flags) { return "Failed to create key event" }
+    }
+    if !post(keyCode, true, flags) || !post(keyCode, false, flags) {
         return "Failed to create key event"
     }
-    down.flags = flags
-    up.flags = flags
-    down.post(tap: .cghidEventTap)
-    up.post(tap: .cghidEventTap)
+    for (code, flag) in modifierKeys.reversed() {
+        flags.remove(flag)
+        if !post(code, false, flags) { return "Failed to create key event" }
+    }
     return nil
 }
 
