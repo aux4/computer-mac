@@ -228,14 +228,15 @@ AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac wait --text "zzq text that is
 
 Both start at once and compete for the screen and for text recognition, so on a busy machine each may
 take a little longer than its 3s timeout to report; the check is that both stop on their own with exit
-code 1, well before the test's own limit.
+code 1, well before the test's own limit. Only their JSON lines are read: a busy runner may add system
+log lines to their stderr.
 
 ```timeout
 30000
 ```
 
 ```execute
-{ aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-a.out & { aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-b.out & wait; cat wait-a.out wait-b.out | jq -s -c '{waited: [.[] | select(has("waited")) | .waited >= 3 and .waited < 10], exits: [.[] | select(has("exit")) | .exit]}'; rm -f wait-a.out wait-b.out
+{ aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-a.out & { aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-b.out & wait; cat wait-a.out wait-b.out | jq -R -s -c '[split("\n")[] | fromjson? | objects] | {waited: [.[] | select(has("waited")) | .waited >= 3 and .waited < 10], exits: [.[] | select(has("exit")) | .exit]}'; rm -f wait-a.out wait-b.out
 ```
 
 ```expect
