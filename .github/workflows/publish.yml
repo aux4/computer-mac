@@ -120,6 +120,7 @@ jobs:
         working-directory: package
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/screenshots"
 
           aux4 computer mac open "Calculator"
           sleep 1
@@ -156,6 +157,32 @@ jobs:
             exit 1
           fi
 
+          # OCR must read the same result from the window's pixels, and its position must land
+          # inside the accessibility element's frame: pixels and accessibility agree on where it is.
+          OCR=""
+          for value in "1,792" "1792"; do
+            OCR=$(aux4 computer mac ocr --app Calculator --text "$value")
+            echo "$OCR" | jq -e '.lines | length > 0' > /dev/null && break
+          done
+          echo "$OCR" | tee "$RUNNER_TEMP/calculator-ocr.json"
+          if ! echo "$OCR" | jq -e '.lines | length > 0' > /dev/null; then
+            echo "::error::OCR did not find the 256x7 result in Calculator's window. OCR read:"
+            aux4 computer mac ocr --app Calculator | jq -c '[.lines[].text]'
+            exit 1
+          fi
+          # The AX element's frame in window coordinates: screen frame minus the window origin
+          # (center - windowCenter).
+          ELEMENT=$(echo "$RESULT" | jq -c '[.matches[] | select(.frame != null and .windowCenter != null)][0]')
+          echo "accessibility element: $ELEMENT"
+          if ! echo "$OCR" | jq -e --argjson el "$ELEMENT" '
+              ($el.center.x - $el.windowCenter.x) as $ox | ($el.center.y - $el.windowCenter.y) as $oy |
+              .lines[0].windowCenter as $c |
+              $c.x >= ($el.frame.x - $ox) and $c.x <= ($el.frame.x - $ox + $el.frame.width) and
+              $c.y >= ($el.frame.y - $oy) and $c.y <= ($el.frame.y - $oy + $el.frame.height)' > /dev/null; then
+            echo "::error::OCR windowCenter $(echo "$OCR" | jq -c '.lines[0].windowCenter') is outside the accessibility frame of the result"
+            exit 1
+          fi
+
           aux4 computer mac open "TextEdit"
           sleep 1
           aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
@@ -168,7 +195,27 @@ jobs:
           fi
 
           # Screenshot of a single window must work (regression: CGS_REQUIRE_INIT crash).
-          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/calculator.png" | jq -e '.width > 0' > /dev/null
+          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/screenshots/calculator.png" | jq -e '.width > 0' > /dev/null
+
+      # Keep what the apps looked like, especially when a live check failed.
+      - name: Capture screenshots
+        if: always()
+        shell: bash
+        working-directory: package
+        run: |
+          mkdir -p "$RUNNER_TEMP/screenshots"
+          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/screenshots/calculator.png" || true
+          aux4 computer mac screenshot --app TextEdit --output "$RUNNER_TEMP/screenshots/textedit.png" || true
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-ui-screenshots
+          path: |
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/calculator-ocr.json
+          if-no-files-found: warn
 
 
   publish:

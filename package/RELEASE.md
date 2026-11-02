@@ -1,5 +1,30 @@
 # Release Notes
 
+## 0.3.0
+
+### `ocr`: read the text on screen
+
+New `aux4 computer mac ocr` recognizes the text in pixels — the main display, an app's front window
+(`--app`, even when covered), or an existing PNG (`--image`, no Screen Recording needed) — on this Mac,
+with no network and nothing to download.
+
+- Each line has `text`, `confidence`, and a `frame`/`center` in screen points; with `--app` also a
+  `windowCenter`, the coordinate space `click --app` uses, so an agent can click something it read.
+- `--text` keeps only the lines containing that text (case-insensitive, whitespace-tolerant) and adds a
+  `match` with the position of just that text.
+- `--level accurate|fast` (default `accurate`), `--languages en-US,...`, `--mode auto|background|foreground`,
+  `--scale` (pixels per point for `--image`).
+
+### Output
+
+- JSON output no longer escapes `/` (paths print as `/tmp/a.png`, not `\/tmp\/a.png`).
+
+### Build
+
+- The live UI publish gate also reads Calculator's 256×7 result with `ocr` and checks that its position
+  falls inside the accessibility element's frame from `find`. The Calculator and TextEdit screenshots
+  (and the OCR output) are kept as workflow artifacts.
+
 ## 0.2.0
 
 ### Background mode by default

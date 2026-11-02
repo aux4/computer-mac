@@ -85,6 +85,61 @@
           }
         },
         {
+          "name": "ocr",
+          "execute": [
+            "${packageDir}/aux4-computer-mac ocr values(app, image, text, level, languages, mode, scale)"
+          ],
+          "help": {
+            "text": "Recognize text on the screen, an app's window or a PNG, with positions in click coordinates",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Read this app's front window (even when covered by other windows); positions are also given relative to it as windowCenter, the space 'click --app' uses",
+                "default": ""
+              },
+              {
+                "name": "image",
+                "text": "Recognize an existing PNG instead of capturing the screen (no Screen Recording permission needed)",
+                "default": ""
+              },
+              {
+                "name": "text",
+                "text": "Only return lines containing this text (case-insensitive); each line also gets a 'match' with the position of just that text",
+                "default": ""
+              },
+              {
+                "name": "level",
+                "text": "accurate (default) or fast recognition",
+                "default": "accurate",
+                "options": [
+                  "accurate",
+                  "fast"
+                ]
+              },
+              {
+                "name": "languages",
+                "text": "Comma-separated recognition languages in priority order, e.g. en-US,pt-BR (default: the system's default)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): capture in the background, bringing the app to the front only if its window isn't on screen; background: never bring it forward (error instead); foreground: bring the app to the front for the capture, then restore",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              },
+              {
+                "name": "scale",
+                "text": "With --image: image pixels per point (the 'scale' from 'screenshot'), so positions come out in points",
+                "default": "1"
+              }
+            ]
+          }
+        },
+        {
           "name": "read",
           "execute": [
             "${packageDir}/aux4-computer-mac read values(app, depth)"

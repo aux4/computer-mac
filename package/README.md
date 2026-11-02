@@ -1,7 +1,7 @@
 # aux4/computer-mac
 
 Computer-use for AI agents on macOS. A native Swift CLI (no Python/Node/cliclick dependency) that lets an
-agent see the screen and act on it: take screenshots, read the accessibility tree, find and click UI
+agent see the screen and act on it: take screenshots, read the text on screen (OCR), read the accessibility tree, find and click UI
 elements, type text, press keyboard shortcuts, scroll, drag, control the clipboard, and manage apps and
 windows. All commands print JSON to stdout.
 
@@ -34,7 +34,7 @@ aux4 computer mac permissions
 
 - **Accessibility** is required for `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`
   and `focus`.
-- **Screen Recording** is required for `screenshot`.
+- **Screen Recording** is required for `screenshot` and `ocr` (except `ocr --image`).
 
 Every command that needs a permission that isn't granted returns a clear JSON error with the exact System
 Settings pane to open — never a silent no-op.
@@ -64,6 +64,7 @@ Pass `--app <name>` to target an app that isn't in front; without it, the frontm
 | `scroll` | Moves the scroll area's scroll bar via Accessibility (or posts the scroll to the app with `--app`) | No scroll area at the point and no `--app` |
 | `open` | Launches without activating; leaves an already-running app as it is | — |
 | `screenshot --app` | Captures the app's window even when covered | — |
+| `ocr --app` | Reads the text in the app's window even when covered | The window isn't on screen (app hidden, window on another Space) |
 
 **Always foreground:** `focus`, `move`, `drag`, and `shortcut` without `--app` (a system-wide hotkey such
 as `cmd+space`).
@@ -72,8 +73,8 @@ as `cmd+space`).
 
 With `--app`, `--x`/`--y` are **relative to that app's front window** — the same space as a
 `screenshot --app` image (divide image pixels by its `scale`) and `find --app`'s `windowCenter`. The
-screenshot output includes the window's `frame` in screen points. Without `--app`, coordinates are screen
-points.
+screenshot output includes the window's `frame` in screen points, and `ocr --app` reports a `windowCenter`
+for every line of text it reads. Without `--app`, coordinates are screen points.
 
 ```bash
 aux4 computer mac screenshot --app Calculator --output /tmp/calc.png
@@ -98,6 +99,42 @@ aux4 computer mac cursor
 front window (via `--app`), even when it's covered by other windows. The image is resized down to `--maxWidth` (default `1568`, a sane upper
 bound for vision models) preserving aspect ratio, and saved as PNG to `--output` (or a temp file if
 omitted).
+
+### Three ways to look at an app
+
+| Command | What it asks | Good for |
+|---------|--------------|----------|
+| `read` / `find` | The app itself, through Accessibility: the elements it exposes, with roles, labels, values and frames | Exact labels and values, clicking by `ref`; fast and precise when the app exposes its UI |
+| `screenshot` | The pixels: an image of the screen or a window | Giving a vision model the full picture: layout, icons, colors, anything drawn |
+| `ocr` | The pixels, read as text: each line with its position in click coordinates | Text the accessibility tree doesn't expose (canvas UIs, images, remote desktops), and checking what is actually shown |
+
+All three work on a covered window with `--app`, and their positions line up: a `find --app` match's
+`windowCenter`, an `ocr --app` line's `windowCenter`, and a point in a `screenshot --app` image (divided by
+its `scale`) can all be passed to `click --app --x --y`.
+
+### Reading text from pixels
+
+```bash
+aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [--level accurate|fast] [--languages en-US,pt-BR]
+```
+
+`ocr` recognizes text on this Mac (no network, nothing to download) in the main display, in an app's
+front window (`--app`, even when covered), or in an existing PNG (`--image`, no Screen Recording needed).
+Each line has `text`, `confidence` (`0`–`1`), a `frame` and a `center` in screen points, plus a
+`windowCenter` with `--app`. `--text` keeps only the lines containing that text (case-insensitive,
+whitespace-tolerant) and adds a `match` with the position of just that text.
+
+```bash
+aux4 computer mac ocr --app Calculator --text "1,792"
+```
+
+```json
+{"app":"Calculator","height":408,"level":"accurate","lines":[{"center":{"x":645,"y":511.5},"confidence":1,"frame":{"height":33,"width":74,"x":608,"y":495},"match":{"center":{"x":645,"y":511.5},"frame":{"height":33,"width":74,"x":608,"y":495},"windowCenter":{"x":183,"y":112.5}},"text":"1,792","windowCenter":{"x":183,"y":112.5}}],"mode":"background","scale":2,"source":"window","text":"1,792","width":230,"window":{"frame":{"height":408,"width":230,"x":462,"y":399},"id":331,"title":"Calculator"}}
+```
+
+**Note:** very small or low-contrast text can be missed or misread, and `--level fast` is much weaker
+than the default `accurate` (on light-on-dark UIs it may find nothing). Check `confidence`, and prefer
+`find` when the app exposes the element.
 
 ### Reading the UI
 
@@ -175,6 +212,7 @@ aux4 computer mac open "TextEdit"
 aux4 computer mac type "hello from an agent" --app "TextEdit"
 aux4 computer mac clipboard paste --text " and a pasted line" --app "TextEdit"
 aux4 computer mac screenshot --app "TextEdit"
+aux4 computer mac ocr --app "TextEdit" --text "hello from an agent"
 ```
 
 ### Example: open Spotlight, launch an app, type and paste (foreground)

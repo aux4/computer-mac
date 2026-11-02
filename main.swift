@@ -5,6 +5,7 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 import UniformTypeIdentifiers
+import Vision
 
 // MARK: - JSON helpers
 
@@ -13,7 +14,7 @@ func printJSON(_ obj: Any) {
         FileHandle.standardOutput.write("{\"error\":\"internal: invalid JSON object\"}\n".data(using: .utf8)!)
         return
     }
-    if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
+    if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]),
        let str = String(data: data, encoding: .utf8) {
         print(str)
     } else {
@@ -22,7 +23,7 @@ func printJSON(_ obj: Any) {
 }
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
-    guard let data = try? JSONSerialization.data(withJSONObject: ["error": message], options: [.sortedKeys]) else {
+    guard let data = try? JSONSerialization.data(withJSONObject: ["error": message], options: [.sortedKeys, .withoutEscapingSlashes]) else {
         FileHandle.standardError.write("{\"error\":\"internal: failed to encode error\"}\n".data(using: .utf8)!)
         exit(code)
     }
@@ -1510,6 +1511,254 @@ func cmdScreenshot(_ args: [String]) async {
     printJSON(out)
 }
 
+// MARK: - ocr (Apple Vision text recognition on pixels)
+
+// round1 keeps one decimal and serializes cleanly (a plain Double prints as 33.600000000000001).
+func round1(_ v: Double) -> NSNumber {
+    return NSDecimalNumber(string: String(format: "%.1f", v))
+}
+
+// textRange finds the filter in a recognized line, case-insensitively and ignoring whitespace
+// differences (recognition sometimes splits "1,792" as "1 ,792").
+func textRange(of filter: String, in text: String) -> Range<String.Index>? {
+    if let r = text.range(of: filter, options: [.caseInsensitive]) { return r }
+    let chars = filter.filter { !$0.isWhitespace }.map { NSRegularExpression.escapedPattern(for: String($0)) }
+    if chars.isEmpty { return nil }
+    return text.range(of: chars.joined(separator: "\\s*"), options: [.caseInsensitive, .regularExpression])
+}
+
+func rectJSON(_ r: CGRect) -> [String: Any] {
+    return ["x": round1(r.origin.x), "y": round1(r.origin.y), "width": round1(r.size.width), "height": round1(r.size.height)]
+}
+
+func centerJSON(_ r: CGRect, minus origin: CGPoint = .zero) -> [String: Any] {
+    return ["x": round1(r.midX - origin.x), "y": round1(r.midY - origin.y)]
+}
+
+func loadPNG(_ path: String) -> CGImage? {
+    let url = URL(fileURLWithPath: path)
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(source, 0, nil)
+}
+
+// backingScale is the pixel density of the screen a rect (in global screen points) sits on.
+func backingScale(for rect: CGRect) -> Double {
+    let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+    for screen in NSScreen.screens {
+        // NSScreen frames are bottom-left based; convert to the top-left global space CG uses.
+        let f = screen.frame
+        let topLeft = CGRect(x: f.origin.x, y: primaryHeight - f.origin.y - f.height, width: f.width, height: f.height)
+        if topLeft.contains(CGPoint(x: rect.midX, y: rect.midY)) {
+            return Double(screen.backingScaleFactor)
+        }
+    }
+    return Double(NSScreen.main?.backingScaleFactor ?? 1)
+}
+
+struct RecognizedLine {
+    let text: String
+    let confidence: Double
+    let box: CGRect                  // in image pixels, top-left origin
+    let matchBox: CGRect?            // the --text substring, in image pixels
+}
+
+func recognizeText(_ image: CGImage, level: String, languages: [String], filter: String) -> [RecognizedLine] {
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = level == "fast" ? .fast : .accurate
+    request.usesLanguageCorrection = true
+    if !languages.isEmpty {
+        if let supported = try? request.supportedRecognitionLanguages() {
+            for lang in languages where !supported.contains(lang) {
+                fail("Unsupported OCR language '\(lang)' for level \(level). Supported: \(supported.joined(separator: ", "))")
+            }
+        }
+        request.recognitionLanguages = languages
+    }
+    let handler = VNImageRequestHandler(cgImage: image, options: [:])
+    do {
+        try handler.perform([request])
+    } catch {
+        fail("Text recognition failed: \(error.localizedDescription)")
+    }
+    let w = Double(image.width)
+    let h = Double(image.height)
+    // Vision boxes are normalized with a bottom-left origin; flip to top-left pixels.
+    func toPixels(_ bb: CGRect) -> CGRect {
+        return CGRect(x: bb.minX * w, y: (1 - bb.maxY) * h, width: bb.width * w, height: bb.height * h)
+    }
+    var lines: [RecognizedLine] = []
+    for observation in request.results ?? [] {
+        guard let candidate = observation.topCandidates(1).first else { continue }
+        let text = candidate.string
+        var matchBox: CGRect? = nil
+        if !filter.isEmpty {
+            guard let range = textRange(of: filter, in: text) else { continue }
+            if let sub = try? candidate.boundingBox(for: range) {
+                matchBox = toPixels(sub.boundingBox)
+            }
+        }
+        lines.append(RecognizedLine(text: text, confidence: Double(candidate.confidence), box: toPixels(observation.boundingBox), matchBox: matchBox))
+    }
+    // Reading order: top to bottom, then left to right for lines on the same row.
+    lines.sort { a, b in
+        if abs(a.box.midY - b.box.midY) > min(a.box.height, b.box.height) / 2 { return a.box.midY < b.box.midY }
+        return a.box.minX < b.box.minX
+    }
+    return lines
+}
+
+func cmdOcr(_ args: [String]) async {
+    let appArg = argAt(args, 0)
+    let imageArg = argAt(args, 1)
+    let filter = argAt(args, 2)
+    let levelArg = argAt(args, 3).isEmpty ? "accurate" : argAt(args, 3).lowercased()
+    let languages = argAt(args, 4).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    let mode = parseMode(argAt(args, 5))
+    let imageScaleArg = parseDouble(argAt(args, 6), default: 1)
+
+    guard levelArg == "accurate" || levelArg == "fast" else {
+        fail("Invalid --level '\(levelArg)': use accurate or fast")
+    }
+    if !imageArg.isEmpty && !appArg.isEmpty {
+        fail("Use either --app or --image, not both")
+    }
+
+    var out: [String: Any] = ["level": levelArg]
+    var image: CGImage
+    // Pixels per point of the analyzed image, and the screen-point origin of what it shows.
+    var scale: Double = 1
+    var origin = CGPoint.zero
+    var windowOrigin: CGPoint? = nil
+
+    if !imageArg.isEmpty {
+        guard FileManager.default.fileExists(atPath: imageArg) else {
+            fail("Image not found: \(imageArg)")
+        }
+        guard let loaded = loadPNG(imageArg) else {
+            fail("Could not read image: \(imageArg)")
+        }
+        image = loaded
+        scale = imageScaleArg > 0 ? imageScaleArg : 1
+        out["source"] = "image"
+        out["path"] = imageArg
+        out["mode"] = "background"
+    } else {
+        var target: NSRunningApplication? = nil
+        if !appArg.isEmpty {
+            guard let app = findRunningApp(named: appArg) else {
+                fail("App not running: \(appArg)")
+            }
+            target = app
+        }
+        requireScreenRecording()
+
+        // Foreground (or auto when the window isn't on screen): bring the app to the front for the
+        // capture, then put the previously frontmost app back.
+        var saved: UserState? = nil
+        var fallbackReason: String? = nil
+        if let app = target {
+            let onScreen = frontWindow(pid: app.processIdentifier) != nil
+            if mode == .foreground || !onScreen {
+                if !onScreen {
+                    if mode == .background { fail("Background mode not possible for ocr: no on-screen window for app: \(appArg)") }
+                    fallbackReason = "no on-screen window for app: \(appArg)"
+                }
+                saved = captureUserState()
+                if !bringToFront(app) {
+                    fail("Could not bring '\(app.localizedName ?? appArg)' to the front for capture")
+                }
+                usleep(300_000)
+            }
+        }
+
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        } catch {
+            fail("Failed to enumerate screen content: \(error.localizedDescription)")
+        }
+
+        if let app = target {
+            guard let win = frontWindow(pid: app.processIdentifier) else {
+                fail("No on-screen window found for app: \(appArg)")
+            }
+            guard let scWin = content.windows.first(where: { $0.windowID == win.id }) else {
+                fail("No capturable window found for app: \(appArg)")
+            }
+            // Recognition is more reliable on dense pixels; capture at least 2x.
+            scale = max(backingScale(for: win.frame), 2)
+            do {
+                image = try await captureImage(filter: SCContentFilter(desktopIndependentWindow: scWin),
+                                               width: Int((win.frame.width * scale).rounded()),
+                                               height: Int((win.frame.height * scale).rounded()))
+            } catch {
+                fail("Failed to capture window for app '\(appArg)': \(error.localizedDescription)")
+            }
+            origin = win.frame.origin
+            windowOrigin = win.frame.origin
+            out["source"] = "window"
+            out["app"] = app.localizedName ?? appArg
+            out["window"] = ["id": Int(win.id), "title": win.title, "frame": frameJSON(win.frame)]
+        } else {
+            let mainID = CGMainDisplayID()
+            guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else {
+                fail("No display found to capture")
+            }
+            let bounds = CGDisplayBounds(display.displayID)
+            scale = max(backingScale(for: bounds), 2)
+            do {
+                image = try await captureImage(filter: SCContentFilter(display: display, excludingWindows: []),
+                                               width: Int((bounds.width * scale).rounded()),
+                                               height: Int((bounds.height * scale).rounded()))
+            } catch {
+                fail("Failed to capture the main display: \(error.localizedDescription)")
+            }
+            origin = bounds.origin
+            out["source"] = "screen"
+            out["display"] = ["id": Int(display.displayID), "frame": frameJSON(bounds)]
+        }
+
+        out["mode"] = saved == nil ? "background" : "foreground"
+        if let reason = fallbackReason { out["fallbackReason"] = reason }
+        if let state = saved {
+            usleep(150_000)
+            out["restored"] = restoreUserState(state)
+        }
+    }
+
+    // Convert image pixels to points in the coordinate space 'click' uses.
+    func toPoints(_ r: CGRect) -> CGRect {
+        return CGRect(x: origin.x + r.origin.x / scale, y: origin.y + r.origin.y / scale,
+                      width: r.width / scale, height: r.height / scale)
+    }
+
+    var lines: [[String: Any]] = []
+    for line in recognizeText(image, level: levelArg, languages: languages, filter: filter) {
+        let frame = toPoints(line.box)
+        var entry: [String: Any] = [
+            "text": line.text,
+            "confidence": NSDecimalNumber(string: String(format: "%.2f", line.confidence)),
+            "frame": rectJSON(frame),
+            "center": centerJSON(frame)
+        ]
+        if let o = windowOrigin { entry["windowCenter"] = centerJSON(frame, minus: o) }
+        if let m = line.matchBox {
+            let mf = toPoints(m)
+            var match: [String: Any] = ["frame": rectJSON(mf), "center": centerJSON(mf)]
+            if let o = windowOrigin { match["windowCenter"] = centerJSON(mf, minus: o) }
+            entry["match"] = match
+        }
+        lines.append(entry)
+    }
+
+    out["width"] = round1(Double(image.width) / scale)
+    out["height"] = round1(Double(image.height) / scale)
+    out["scale"] = round1(scale)
+    if !filter.isEmpty { out["text"] = filter }
+    out["lines"] = lines
+    printJSON(out)
+}
+
 // MARK: - entrypoint
 
 let allArgs = CommandLine.arguments
@@ -1540,6 +1789,9 @@ case "screenshot":
     // CGS_REQUIRE_INIT assertion. NSApplication.shared sets it up without activating anything.
     _ = NSApplication.shared
     await cmdScreenshot(rest)
+case "ocr":
+    _ = NSApplication.shared
+    await cmdOcr(rest)
 case "clipboard-read": cmdClipboardRead()
 case "clipboard-copy": cmdClipboardCopy(rest)
 case "clipboard-paste": cmdClipboardPaste(rest)

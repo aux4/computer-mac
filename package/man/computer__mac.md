@@ -1,7 +1,7 @@
 #### Description
 
 The `mac` command groups every command that lets an AI agent see and operate this Mac: `permissions`,
-`screenshot`, `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`, `cursor`, `screen`,
+`screenshot`, `ocr`, `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`, `cursor`, `screen`,
 `apps`, `windows`, `open`, `focus`, and `clipboard`. All commands print a single JSON object to stdout. This package only runs on macOS.
 
 Actions run **in the background by default**: with `--app`, `click`, `type`, `scroll`, `shortcut` and
