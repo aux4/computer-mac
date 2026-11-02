@@ -345,14 +345,11 @@ jobs:
             [ "$(cm window list TextEdit | jq '[.windows[] | select(.subrole == null)] | length')" -gt 0 ] && break
             sleep 0.2
           done
-          # set --value marks the document edited (an inserted selection may not), so closing asks.
-          AREA=$(cm find "" --role AXTextArea --app TextEdit | jq -r '.matches[0].ref')
-          cm set --app TextEdit --element "$AREA" --value "Unsaved by aux4/computer-mac CI" | check set-unsaved '.after == "Unsaved by aux4/computer-mac CI"'
+          # Text set through Accessibility doesn't mark the document edited (it would close without
+          # asking); real keystrokes do. CI only: type in the foreground.
+          cm type "Unsaved by aux4/computer-mac CI" --app TextEdit --mode foreground | check type-unsaved '.mode == "foreground"'
           cm wait --app TextEdit --text "Unsaved by aux4/computer-mac CI" --source ax --timeout 10s > /dev/null
-          cm window list TextEdit | tee "$T/before-close-unsaved.json"
-          cm state --app TextEdit --depth 1 | jq -c '{windows, dialog}' || true
           cm window close --app TextEdit > "$T/close-unsaved.raw.json" || true
-          cat "$T/close-unsaved.raw.json"; cm window list TextEdit || true; cm dialog --app TextEdit | cut -c1-400 || true
           check close-unsaved '.closed == false and .dialog != null and (.note | test("dialog --app"))' < "$T/close-unsaved.raw.json"
           if cm quit Finder --force true 2> "$T/quit-finder.err"; then echo "::error::force-quit Finder was not refused"; exit 1; fi
           cm quit TextEdit --timeout 10s | check quit-blocked '.terminated == false and (.dialog.buttons | length > 0) and (.note | test("dialog --app"))'
