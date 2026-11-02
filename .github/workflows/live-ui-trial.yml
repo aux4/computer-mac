@@ -55,7 +55,10 @@ jobs:
           aux4 computer mac open "Calculator"
           sleep 1
 
-          for key in 2 5 6 "×" 7 "="; do
+          # macOS Calculator's AXButton labels are spelled out (e.g. "Multiply",
+          # "Equals"), not the glyphs shown on the keys - confirmed by reading
+          # the app's own accessibility tree (`find "" --role AXButton`).
+          for key in "All Clear" 2 5 6 Multiply 7 Equals; do
             REF=$(aux4 computer mac find "$key" --role AXButton --app Calculator | jq -r '.matches[0].ref')
             if [ -z "$REF" ] || [ "$REF" = "null" ]; then
               echo "::error::could not find Calculator button '$key'"
