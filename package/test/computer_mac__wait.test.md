@@ -146,6 +146,31 @@ aux4 computer mac wait --text Save --app ThisAppDoesNotExist12345 --source ax --
 {"error":"Timed out after 200ms waiting for text 'Save' in ThisAppDoesNotExist12345 to appear","seen":{"running":false,"window":false}}
 ```
 
+## when text recognition is slow
+
+A first recognition pass can take a long time while the system loads its models;
+`AUX4_COMPUTER_MAC_OCR_DELAY_MS` simulates that.
+
+### should still give up at the timeout
+
+```execute
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 1s 2>&1 | jq -c '{bounded: (.waited < 2.5), ocrPending: .seen.ocrPending}'
+```
+
+```expect
+{"bounded":true,"ocrPending":true}
+```
+
+### with --gone should not count an unfinished check as gone
+
+```execute
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --gone true --timeout 1s 2>&1 | jq -c '{error}'
+```
+
+```expect
+{"error":"Timed out after 1s waiting for text 'zzq text that is never on screen 0451' to disappear"}
+```
+
 ## without permissions
 
 ### should error with guidance when Accessibility is not granted

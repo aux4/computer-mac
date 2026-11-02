@@ -1896,7 +1896,51 @@ func axTick(pid: pid_t, text: String, role: String, windowOrigin: CGPoint?, dead
 
 // ocrTick reads the app's window (or the main display) in the background only: a window that isn't
 // on screen is simply not seen this tick — wait never brings an app forward.
-func ocrTick(app: NSRunningApplication?, text: String) async -> ([[String: Any]], [String])? {
+// OCRWorker runs recognition off the main thread so a slow pass can't hold 'wait' past its timeout:
+// a cold first recognition can take tens of seconds while the system loads its models. One pass
+// runs at a time; a check that gives up on it leaves it running and skips OCR until it is done.
+final class OCRWorker: @unchecked Sendable {
+    static let shared = OCRWorker()
+    private let lock = NSLock()
+    private var busy = false
+
+    var isBusy: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return busy
+    }
+
+    func recognize(_ image: CGImage, filter: String, wait: Double) -> [RecognizedLine]? {
+        lock.lock()
+        if busy { lock.unlock(); return nil }
+        busy = true
+        lock.unlock()
+        let done = DispatchSemaphore(value: 0)
+        let box = ResultBox()
+        // AUX4_COMPUTER_MAC_OCR_DELAY_MS simulates a slow recognition pass, to test that it can't hold
+        // 'wait' past --timeout.
+        let delay = Double(ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_OCR_DELAY_MS"] ?? "") ?? 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            if delay > 0 { usleep(useconds_t(min(delay, 60_000) * 1000)) }
+            let lines = recognizeText(image, level: "accurate", languages: [], filter: filter, keepUnmatched: true)
+            box.set(lines)
+            self.lock.lock(); self.busy = false; self.lock.unlock()
+            done.signal()
+        }
+        if done.wait(timeout: .now() + max(wait, 0)) == .timedOut { return nil }
+        return box.get()
+    }
+
+    private final class ResultBox {
+        private let lock = NSLock()
+        private var lines: [RecognizedLine]? = nil
+        func set(_ l: [RecognizedLine]) { lock.lock(); lines = l; lock.unlock() }
+        func get() -> [RecognizedLine]? { lock.lock(); defer { lock.unlock() }; return lines }
+    }
+}
+
+// Returns nil when the pixels couldn't be read this check (no capture, or recognition still running).
+func ocrTick(app: NSRunningApplication?, text: String, maxWait: Double) async -> ([[String: Any]], [String])? {
+    if OCRWorker.shared.isBusy { return nil }
     let content: SCShareableContent
     do {
         content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -1930,9 +1974,10 @@ func ocrTick(app: NSRunningApplication?, text: String) async -> ([[String: Any]]
         return CGRect(x: origin.x + r.origin.x / scale, y: origin.y + r.origin.y / scale,
                       width: r.width / scale, height: r.height / scale)
     }
+    guard let lines = OCRWorker.shared.recognize(image, filter: text, wait: maxWait) else { return nil }
     var matches: [[String: Any]] = []
     var seen: [String] = []
-    for line in recognizeText(image, level: "accurate", languages: [], filter: text, keepUnmatched: true) {
+    for line in lines {
         appendSeen(&seen, line.text)
         if line.matched { matches.append(ocrEntry(line, toPoints: toPoints, windowOrigin: windowOrigin)) }
     }
@@ -2022,7 +2067,10 @@ func cmdWait(_ args: [String]) async {
             }
             if !tick.present && useOCR && (app == nil || window != nil) && Date() < deadline {
                 checked.append("ocr")
-                if let (matches, seen) = await ocrTick(app: app, text: text) {
+                // Wait for recognition up to a couple of seconds per check (never past the deadline),
+                // so the accessibility checks keep running while a slow pass finishes.
+                let maxWait = min(max(interval, 2.0), deadline.timeIntervalSinceNow)
+                if let (matches, seen) = await ocrTick(app: app, text: text, maxWait: maxWait) {
                     tick.seen["ocr"] = seen
                     if !matches.isEmpty {
                         tick.present = true
@@ -2031,6 +2079,7 @@ func cmdWait(_ args: [String]) async {
                     }
                 } else {
                     tick.complete = false
+                    if OCRWorker.shared.isBusy { tick.seen["ocrPending"] = true }
                 }
             }
             if !tick.present { tick.source = checked.isEmpty ? (useAX ? "ax" : "ocr") : checked.joined(separator: "+") }

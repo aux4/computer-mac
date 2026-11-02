@@ -23,7 +23,10 @@ Text matching ignores case, whitespace and commas, so `--text 1792` matches `1,7
   pixels (no `--role`). In `auto`, OCR is skipped when Screen Recording isn't granted (noted in `notes`).
 - **`--timeout`** — how long to wait: `500ms`, `10s`, `2m`, or a number of seconds (default `10s`).
 - **`--interval`** — the pause between checks (default `500ms`). Checks never overlap: an OCR check
-  can take a few hundred milliseconds, and the next one starts an interval after it finishes.
+  can take a few hundred milliseconds, and the next one starts an interval after it finishes. The very
+  first text recognition after the Mac has been idle can take much longer while the system loads its
+  models; `wait` keeps checking the accessibility tree meanwhile and still stops at `--timeout`
+  (`seen.ocrPending` is `true` when recognition was still running at that point).
 
 `wait` only reads: it never moves the cursor, never brings an app forward, and only reads a window with
 OCR while it is on screen (covered is fine; hidden or on another Space is not seen). It needs the

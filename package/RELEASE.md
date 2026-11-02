@@ -1,5 +1,12 @@
 # Release Notes
 
+## 0.4.1
+
+- `wait`: text recognition runs off the main loop and is bounded per check, so a slow first recognition
+  pass (tens of seconds while the system loads its models) can no longer hold `wait` far past
+  `--timeout`; accessibility checks keep running meanwhile, and `seen.ocrPending` reports it. A check
+  that couldn't finish never counts as `--gone`.
+
 ## 0.4.0
 
 ### `wait`: block until something appears (or is gone)
