@@ -74,8 +74,105 @@ jobs:
           path: package/dist
           if-no-files-found: error
 
+  # Live UI test on the hosted macOS runner (which grants Accessibility and
+  # Screen Recording): drives real apps in background mode. Publishing waits on it.
+  test-live:
+    needs: [lint]
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install aux4 CLI
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+
+      - name: Install pkger
+        shell: bash
+        run: curl -fsSL https://pkger.aux4.sh | sh
+
+      - name: Build
+        shell: bash
+        run: aux4 builder darwin
+
+      # Run from package/ so aux4 loads the package's own .aux4 (no install
+      # needed); ${packageDir} then resolves to package/, where the binary is linked.
+      - name: Link binary
+        shell: bash
+        run: ln -sf dist/darwin/arm64/aux4-computer-mac package/aux4-computer-mac
+
+      - name: Check permissions
+        shell: bash
+        working-directory: package
+        run: |
+          aux4 computer mac permissions | tee perms.json
+          # This job is a publish gate: a runner without the permissions fails it
+          # rather than silently skipping the live checks.
+          if [ "$(jq -r '.accessibility.granted and .screenRecording.granted' perms.json)" != "true" ]; then
+            echo "::error::Accessibility/Screen Recording not granted on this runner; live UI tests cannot run."
+            exit 1
+          fi
+
+      - name: Live UI test (Calculator + TextEdit)
+        shell: bash
+        working-directory: package
+        run: |
+          set -euo pipefail
+
+          aux4 computer mac open "Calculator"
+          sleep 1
+
+          # Calculator's AXButton labels differ by macOS version (e.g. "Multiply"
+          # on macOS 26, a glyph or lowercase word on older ones), so each key
+          # lists its candidates separated by "|".
+          for keys in "All Clear|Clear|AC|C" "2" "5" "6" "Multiply|multiply|×|*" "7" "Equals|equals|="; do
+            REF=""
+            IFS='|' read -ra CANDIDATES <<< "$keys"
+            for key in "${CANDIDATES[@]}"; do
+              REF=$(aux4 computer mac find "$key" --role AXButton --app Calculator | jq -r '[.matches[] | select(.label == "'"$key"'")][0].ref // .matches[0].ref // empty')
+              [ -n "$REF" ] && break
+            done
+            if [ -z "$REF" ]; then
+              echo "::error::could not find Calculator button '$keys'. Buttons on this runner:"
+              aux4 computer mac find "" --role AXButton --app Calculator | jq -r '.matches[].label'
+              exit 1
+            fi
+            aux4 computer mac click --element "$REF" --app Calculator
+            sleep 0.3
+          done
+
+          sleep 0.5
+          # Older Calculators show "1792"; newer ones group digits as "1,792".
+          RESULT=$(aux4 computer mac find "1,792" --app Calculator)
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            RESULT=$(aux4 computer mac find "1792" --app Calculator)
+          fi
+          echo "$RESULT"
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::256x7 result not found. Text on Calculator:"
+            aux4 computer mac find "" --role AXStaticText --app Calculator | jq -c '.matches[] | {label, value}'
+            exit 1
+          fi
+
+          aux4 computer mac open "TextEdit"
+          sleep 1
+          aux4 computer mac type "Hello from aux4/computer-mac CI" --app TextEdit
+          sleep 0.5
+          TYPED=$(aux4 computer mac find "Hello from aux4/computer-mac CI" --app TextEdit)
+          echo "$TYPED"
+          if ! echo "$TYPED" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::typed text not found in TextEdit"
+            exit 1
+          fi
+
+          # Screenshot of a single window must work (regression: CGS_REQUIRE_INIT crash).
+          aux4 computer mac screenshot --app Calculator --output "$RUNNER_TEMP/calculator.png" | jq -e '.width > 0' > /dev/null
+
+
   publish:
-    needs: [test-darwin]
+    needs: [test-darwin, test-live]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

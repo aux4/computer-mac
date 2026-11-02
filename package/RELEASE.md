@@ -31,7 +31,8 @@ as `screenshot --app`. `screenshot --app` output now includes the window `frame`
 ### Build
 
 - Built, tested and published by GitHub Actions (`aux4/action@v1`) on a macOS runner;
-  publishing is gated on `aux4 test run` passing.
+  publishing is gated on `aux4 test run` passing and on a live UI test that drives
+  Calculator and TextEdit in background mode on the runner.
 
 ### Fixes
 
