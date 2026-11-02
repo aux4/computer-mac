@@ -26,6 +26,14 @@ jobs:
         shell: bash
         run: aux4 builder darwin
 
+      # Runner-only (disposable VM): make apps ask about unsaved changes when closing or quitting,
+      # as a Mac with "Ask to keep changes when closing documents" does, so quit's dialog path runs.
+      - name: Ask to keep changes on quit
+        shell: bash
+        run: |
+          defaults write -g NSCloseAlwaysConfirmsChanges -bool true
+          defaults write -g NSQuitAlwaysKeepsWindows -bool false
+
       # Run from package/ so aux4 loads the package's own .aux4 (no install
       # needed); ${packageDir} then resolves to package/, where the binary is linked.
       - name: Link binary
@@ -354,7 +362,7 @@ jobs:
             if [ -z "$BUTTON" ]; then echo "::error::no Delete/Don't Save button: $(jq -c '[.dialog.buttons[].title]' "$T/quit.json")"; exit 1; fi
             cm dialog --app TextEdit --press "$BUTTON" --mode background | tee "$T/quit-dialog.json"
           else
-            echo "::warning::TextEdit quit without asking about the unsaved document"
+            echo "::error::TextEdit quit without asking about the unsaved document"; exit 1
           fi
           for i in $(seq 1 50); do
             [ "$(cm apps | jq '[.apps[] | select(.name == "TextEdit")] | length')" -eq 0 ] && break
