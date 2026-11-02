@@ -1,5 +1,20 @@
 # Release Notes
 
+## 0.4.3
+
+- `ocr --timeout` (default `60s`): `ocr` always stops at the deadline with exit code `1` and a JSON
+  error naming the `phase` (`capture` or `recognition`), instead of hanging on a capture that never
+  returns. A screen capture that doesn't respond within 10s fails on its own. If `ocr` had brought an
+  app forward for the capture, it restores the previous frontmost app before exiting.
+- Slow first recognition explained and recovered: on a Mac with a Neural Engine, macOS compiles its
+  text models the first time a new build of the package recognizes text (about 30s, longer while its
+  Neural Engine compiler is busy). A process that exits during that compile used to throw it away, so
+  every short-deadline call started over and each took ~30s. Now, when `ocr` or `wait` reaches its
+  deadline mid-compile, the error says so (`note` / `notes`) and one short-lived background helper
+  finishes the compile (`"warmup":true` / `seen.ocrWarmup`), so the next call is fast (~0.1s).
+  `AUX4_COMPUTER_MAC_NO_WARMUP=1` turns the helper off.
+- `ocr` and `wait` deadlines fire on time (system timer coalescing had let a 60s deadline fire ~4s late).
+
 ## 0.4.2
 
 - `wait` always stops at `--timeout`: a watchdog prints the timeout error even when something in flight

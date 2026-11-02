@@ -7,6 +7,13 @@ The fixture `fixtures/ocr-sample.png` is 600x200 and shows "Hello aux4" near the
 
 ### should return every line of text in reading order
 
+The first recognition by a new build can take about 30s on a Mac with a Neural Engine while macOS
+prepares its text models; later ones take a fraction of a second.
+
+```timeout
+90000
+```
+
 ```execute
 aux4 computer mac ocr --image fixtures/ocr-sample.png | jq -c '[.matches[].text]'
 ```
@@ -168,4 +175,96 @@ aux4 computer mac ocr --app "ThisAppDoesNotExist12345"
 
 ```error
 {"error":"App not running: ThisAppDoesNotExist12345"}
+```
+
+## --timeout
+
+`ocr` always stops at `--timeout` (default `60s`) with a JSON error on stderr and exit code `1`, whatever
+is still in flight. `AUX4_COMPUTER_MAC_OCR_DELAY_MS` simulates slow recognition and
+`AUX4_COMPUTER_MAC_CAPTURE_HANG=1` a screen capture that never completes.
+
+### should finish normally well within the timeout
+
+```execute
+aux4 computer mac ocr --image fixtures/ocr-sample.png --timeout 20s | jq -c '[.matches[].text]'
+```
+
+```expect
+["Hello aux4","Total: 1,792"]
+```
+
+### should give up at the timeout when recognition is slow
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac ocr --image fixtures/ocr-sample.png --timeout 1s 2>&1 | jq -c '{error, phase, timeout, bounded: (.waited >= 1 and .waited < 1.6)}'
+```
+
+```expect
+{"error":"Text recognition did not finish within 1s","phase":"recognition","timeout":1,"bounded":true}
+```
+
+### should exit with code 1 on timeout
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac ocr --image fixtures/ocr-sample.png --timeout 500ms 2>/dev/null; echo "exit $?"
+```
+
+```expect
+exit 1
+```
+
+### should give up at the timeout when the screen capture never completes
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac ocr --timeout 2s 2>&1 | jq -c '{error, phase, bounded: (.waited < 2.6)}'
+```
+
+```expect
+{"error":"Timed out after 2s during screen capture","phase":"capture","bounded":true}
+```
+
+### should report a stalled capture after 10s even with a longer timeout
+
+```timeout
+16000
+```
+
+```execute
+AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac ocr --timeout 30s 2>&1 | jq -c .
+```
+
+```expect
+{"error":"Screen capture did not respond within 10s","phase":"capture"}
+```
+
+### should reject a timeout that isn't a duration
+
+```execute
+aux4 computer mac ocr --image fixtures/ocr-sample.png --timeout soon
+```
+
+```error
+{"error":"Invalid --timeout 'soon': use e.g. 500ms, 10s or 2m"}
+```
+
+### should reject a zero timeout
+
+```execute
+aux4 computer mac ocr --image fixtures/ocr-sample.png --timeout 0s
+```
+
+```error
+{"error":"Invalid --timeout '0s': must be more than 0"}
 ```

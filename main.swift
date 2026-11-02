@@ -1583,6 +1583,84 @@ func captureForOCR(filter: SCContentFilter, size: CGSize) async throws -> (CGIma
     return (upscaled, Double(w) / Double(size.width))
 }
 
+// afterStrict runs `handler` after `seconds` on a background queue without timer coalescing:
+// asyncAfter lets the system defer a timer by a fraction of its interval (a 60s deadline fired ~4s
+// late), which a hard deadline can't afford.
+var strictTimers: [DispatchSourceTimer] = []
+let strictTimersLock = NSLock()
+func afterStrict(_ seconds: Double, _ handler: @escaping @Sendable () -> Void) {
+    let timer = DispatchSource.makeTimerSource(flags: .strict, queue: DispatchQueue.global(qos: .userInitiated))
+    timer.schedule(deadline: .now() + max(seconds, 0), leeway: .milliseconds(5))
+    timer.setEventHandler(handler: handler)
+    strictTimersLock.lock(); strictTimers.append(timer); strictTimersLock.unlock()
+    timer.resume()
+}
+
+// RecognitionState tracks whether Vision is inside a recognition pass right now.
+//
+// On Macs with a Neural Engine, the first recognition by a given build of this binary makes macOS
+// compile Vision's text models for the Neural Engine (ANECompilerService, ~30s). The result is cached
+// per executable build, so later passes take ~0.1s — but only if that first pass is allowed to finish:
+// a process that exits mid-compile (a --timeout) throws the work away, and the next one starts over.
+final class RecognitionState: @unchecked Sendable {
+    static let shared = RecognitionState()
+    private let lock = NSLock()
+    private var active = false
+    func begin() { lock.lock(); active = true; lock.unlock() }
+    func end() { lock.lock(); active = false; lock.unlock() }
+    var inProgress: Bool { lock.lock(); defer { lock.unlock() }; return active }
+}
+
+let ocrWarmupNote = "text recognition did not finish in time: macOS's Neural Engine compiler was still preparing the text models (about 30s the first time; longer while it is busy with other requests); it continues in the background, so retry shortly"
+
+// spawnOCRWarmup starts a detached 'ocr-warmup' of this same binary, so a recognition pass cut short
+// by a deadline still finishes preparing the models for the next call. At most one runs at a time
+// (it holds a lock), it never touches the screen, and it exits on its own (hard cap 120s).
+// AUX4_COMPUTER_MAC_NO_WARMUP=1 turns it off.
+func spawnOCRWarmup() -> Bool {
+    if ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_NO_WARMUP"] == "1" { return false }
+    guard let exe = Bundle.main.executablePath else { return false }
+    var attr: posix_spawnattr_t? = nil
+    posix_spawnattr_init(&attr)
+    defer { posix_spawnattr_destroy(&attr) }
+    // Own session (outlives the caller's process group); inherit only the descriptors set up below.
+    posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
+    var actions: posix_spawn_file_actions_t? = nil
+    posix_spawn_file_actions_init(&actions)
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+    posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
+    posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+    let argv: [UnsafeMutablePointer<CChar>?] = [strdup(exe), strdup("ocr-warmup"), nil]
+    defer { argv.forEach { free($0) } }
+    var pid: pid_t = 0
+    return posix_spawn(&pid, exe, &actions, &attr, argv, environ) == 0
+}
+
+// cmdOcrWarmup runs one accurate recognition on a small rendered image, then exits.
+func cmdOcrWarmup() {
+    let lockPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("aux4-computer-mac-ocr-warmup.lock")
+    let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
+    if fd < 0 || flock(fd, LOCK_EX | LOCK_NB) != 0 { exit(0) }
+    afterStrict(120) { exit(1) }
+    let w = 480, h = 120
+    guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { exit(1) }
+    ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    let font = CTFontCreateWithName("Helvetica" as CFString, 40, nil)
+    let attrs: [NSAttributedString.Key: Any] = [
+        NSAttributedString.Key(kCTFontAttributeName as String): font,
+        NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
+    ]
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: "Total: 1,792", attributes: attrs))
+    ctx.textPosition = CGPoint(x: 24, y: 40)
+    CTLineDraw(line, ctx)
+    guard let image = ctx.makeImage() else { exit(1) }
+    _ = recognizeText(image, level: "accurate", languages: [], filter: "")
+    exit(0)
+}
+
 struct RecognizedLine {
     let text: String
     let confidence: Double
@@ -1605,12 +1683,17 @@ func recognizeText(_ image: CGImage, level: String, languages: [String], filter:
         }
         request.recognitionLanguages = languages
     }
+    // AUX4_COMPUTER_MAC_OCR_DELAY_MS simulates a slow recognition pass (tests for --timeout).
+    let delay = Double(ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_OCR_DELAY_MS"] ?? "") ?? 0
+    if delay > 0 { usleep(useconds_t(min(delay, 120_000) * 1000)) }
     let handler = VNImageRequestHandler(cgImage: image, options: [:])
+    RecognitionState.shared.begin()
     do {
         try handler.perform([request])
     } catch {
         fail("Text recognition failed: \(error.localizedDescription)")
     }
+    RecognitionState.shared.end()
     let w = Double(image.width)
     let h = Double(image.height)
     // Vision boxes are normalized with a bottom-left origin; flip to top-left pixels.
@@ -1663,6 +1746,137 @@ func ocrEntry(_ line: RecognizedLine, toPoints: (CGRect) -> CGRect, windowOrigin
     return entry
 }
 
+// OCRDeadline makes sure ocr prints exactly one result: its output, an error, or the watchdog's
+// timeout error at --timeout. If ocr brought an app forward, it is put back before exiting.
+final class OCRDeadline: @unchecked Sendable {
+    static let shared = OCRDeadline()
+    private let lock = NSLock()
+    private var finished = false
+    private var phase = "starting"
+    private var saved: UserState? = nil
+    private var timeout = 0.0
+    private var timeoutText = ""
+    private var start = Date()
+
+    func begin(timeout: Double, text: String) {
+        lock.lock(); self.timeout = timeout; timeoutText = text; start = Date(); lock.unlock()
+    }
+    func setPhase(_ p: String) { lock.lock(); phase = p; lock.unlock() }
+    func setSaved(_ s: UserState?) { lock.lock(); saved = s; lock.unlock() }
+
+    // claim returns the user state to restore, or nil if another outcome already won (then this
+    // thread parks until that one exits).
+    private func claim() -> (UserState?, String, Double, String, Double) {
+        lock.lock()
+        if finished { lock.unlock(); while true { sleep(60) } }
+        finished = true
+        let r = (saved, phase, timeout, timeoutText, Date().timeIntervalSince(start))
+        lock.unlock()
+        return r
+    }
+
+    func succeed(_ out: [String: Any]) {
+        _ = claim()
+        printJSON(out)
+    }
+
+    func fail(_ err: [String: Any]) -> Never {
+        let (state, _, _, _, _) = claim()
+        var e = err
+        if let st = state { e["restored"] = restoreUserState(st) }
+        failJSON(e)
+    }
+
+    func timeOut() -> Never {
+        let (state, phase, timeout, timeoutText, elapsed) = claim()
+        var err: [String: Any] = [
+            "error": phase == "capture" ? "Timed out after \(timeoutText) during screen capture" : "Text recognition did not finish within \(timeoutText)",
+            "phase": phase,
+            "timeout": round2(timeout),
+            "waited": round2(elapsed)
+        ]
+        if RecognitionState.shared.inProgress {
+            err["note"] = ocrWarmupNote
+            if spawnOCRWarmup() { err["warmup"] = true }
+        }
+        if let st = state { err["restored"] = restoreUserState(st) }
+        failJSON(err)
+    }
+}
+
+struct OCRCaptured: @unchecked Sendable {
+    let image: CGImage
+    let scale: Double
+    let origin: CGPoint
+    let windowOrigin: CGPoint?
+    let fields: [String: Any]
+}
+
+enum OCRCaptureResult: @unchecked Sendable {
+    case ok(OCRCaptured)
+    case failed(String)
+}
+
+// raceOCRCapture runs ocr's capture but gives up after `seconds` (nil): a stalled ScreenCaptureKit
+// request never calls back. AUX4_COMPUTER_MAC_CAPTURE_HANG=1 simulates that.
+func raceOCRCapture(_ seconds: Double, pid: pid_t?, appArg: String) async -> OCRCaptureResult? {
+    let hang = ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_CAPTURE_HANG"] == "1"
+    return await withCheckedContinuation { (cont: CheckedContinuation<OCRCaptureResult?, Never>) in
+        let gate = ResumeGate()
+        Task.detached {
+            if hang { try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
+            let result = await captureOCRSource(pid: pid, appArg: appArg)
+            if gate.claim() { cont.resume(returning: result) }
+        }
+        afterStrict(seconds) {
+            if gate.claim() { cont.resume(returning: nil) }
+        }
+    }
+}
+
+// captureOCRSource captures the app's front window (pid) or the main display for 'ocr'.
+func captureOCRSource(pid: pid_t?, appArg: String) async -> OCRCaptureResult {
+    let content: SCShareableContent
+    do {
+        content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+    } catch {
+        return .failed("Failed to enumerate screen content: \(error.localizedDescription)")
+    }
+    if let pid = pid {
+        guard let win = frontWindow(pid: pid) else {
+            return .failed("No on-screen window found for app: \(appArg)")
+        }
+        guard let scWin = content.windows.first(where: { $0.windowID == win.id }) else {
+            return .failed("No capturable window found for app: \(appArg)")
+        }
+        do {
+            let (image, scale) = try await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size)
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? appArg
+            return .ok(OCRCaptured(image: image, scale: scale, origin: win.frame.origin, windowOrigin: win.frame.origin, fields: [
+                "source": "window",
+                "app": name,
+                "window": ["id": Int(win.id), "title": win.title, "frame": frameJSON(win.frame)]
+            ]))
+        } catch {
+            return .failed("Failed to capture window for app '\(appArg)': \(error.localizedDescription)")
+        }
+    }
+    let mainID = CGMainDisplayID()
+    guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else {
+        return .failed("No display found to capture")
+    }
+    let bounds = CGDisplayBounds(display.displayID)
+    do {
+        let (image, scale) = try await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size)
+        return .ok(OCRCaptured(image: image, scale: scale, origin: bounds.origin, windowOrigin: nil, fields: [
+            "source": "screen",
+            "display": ["id": Int(display.displayID), "frame": frameJSON(bounds)]
+        ]))
+    } catch {
+        return .failed("Failed to capture the main display: \(error.localizedDescription)")
+    }
+}
+
 func cmdOcr(_ args: [String]) async {
     let appArg = argAt(args, 0)
     let imageArg = argAt(args, 1)
@@ -1671,6 +1885,9 @@ func cmdOcr(_ args: [String]) async {
     let languages = argAt(args, 4).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     let mode = parseMode(argAt(args, 5))
     let imageScaleArg = parseDouble(argAt(args, 6), default: 1)
+    let timeoutText = argAt(args, 7).isEmpty ? "60s" : argAt(args, 7)
+    let timeout = parseDuration(timeoutText, name: "timeout")
+    guard timeout > 0 else { fail("Invalid --timeout '\(timeoutText)': must be more than 0") }
 
     guard levelArg == "accurate" || levelArg == "fast" else {
         fail("Invalid --level '\(levelArg)': use accurate or fast")
@@ -1678,6 +1895,13 @@ func cmdOcr(_ args: [String]) async {
     if !imageArg.isEmpty && !appArg.isEmpty {
         fail("Use either --app or --image, not both")
     }
+
+    // Hard deadline: whatever is in flight (a stalled capture, a recognition pass that is still
+    // preparing its models), the timeout error is printed at --timeout and the user's frontmost app
+    // and cursor are restored if ocr had brought an app forward.
+    let deadline = OCRDeadline.shared
+    deadline.begin(timeout: timeout, text: timeoutText)
+    afterStrict(timeout) { deadline.timeOut() }
 
     var out: [String: Any] = ["level": levelArg]
     var image: CGImage
@@ -1727,53 +1951,33 @@ func cmdOcr(_ args: [String]) async {
             }
         }
 
-        let content: SCShareableContent
-        do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        } catch {
-            fail("Failed to enumerate screen content: \(error.localizedDescription)")
+        // The capture is bounded: a ScreenCaptureKit request can stall and never call back.
+        deadline.setPhase("capture")
+        deadline.setSaved(saved)
+        let captureLimit = 10.0
+        guard let result = await raceOCRCapture(captureLimit, pid: target?.processIdentifier, appArg: appArg) else {
+            deadline.fail(["error": "Screen capture did not respond within \(Int(captureLimit))s", "phase": "capture"])
         }
-
-        if let app = target {
-            guard let win = frontWindow(pid: app.processIdentifier) else {
-                fail("No on-screen window found for app: \(appArg)")
-            }
-            guard let scWin = content.windows.first(where: { $0.windowID == win.id }) else {
-                fail("No capturable window found for app: \(appArg)")
-            }
-            do {
-                (image, scale) = try await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size)
-            } catch {
-                fail("Failed to capture window for app '\(appArg)': \(error.localizedDescription)")
-            }
-            origin = win.frame.origin
-            windowOrigin = win.frame.origin
-            out["source"] = "window"
-            out["app"] = app.localizedName ?? appArg
-            out["window"] = ["id": Int(win.id), "title": win.title, "frame": frameJSON(win.frame)]
-        } else {
-            let mainID = CGMainDisplayID()
-            guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else {
-                fail("No display found to capture")
-            }
-            let bounds = CGDisplayBounds(display.displayID)
-            do {
-                (image, scale) = try await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size)
-            } catch {
-                fail("Failed to capture the main display: \(error.localizedDescription)")
-            }
-            origin = bounds.origin
-            out["source"] = "screen"
-            out["display"] = ["id": Int(display.displayID), "frame": frameJSON(bounds)]
+        switch result {
+        case .failed(let message):
+            deadline.fail(["error": message])
+        case .ok(let px):
+            image = px.image
+            scale = px.scale
+            origin = px.origin
+            windowOrigin = px.windowOrigin
+            for (k, v) in px.fields { out[k] = v }
         }
 
         out["mode"] = saved == nil ? "background" : "foreground"
         if let reason = fallbackReason { out["fallbackReason"] = reason }
         if let state = saved {
             usleep(150_000)
+            deadline.setSaved(nil)
             out["restored"] = restoreUserState(state)
         }
     }
+    deadline.setPhase("recognition")
 
     // Convert image pixels to points in the coordinate space 'click' uses.
     func toPoints(_ r: CGRect) -> CGRect {
@@ -1791,7 +1995,7 @@ func cmdOcr(_ args: [String]) async {
     out["scale"] = round1(scale)
     if !filter.isEmpty { out["text"] = filter }
     out["matches"] = lines
-    printJSON(out)
+    deadline.succeed(out)
 }
 
 // MARK: - wait (poll until text / an element / an app window appears, or is gone)
@@ -1919,11 +2123,8 @@ final class OCRWorker: @unchecked Sendable {
         lock.unlock()
         let done = DispatchSemaphore(value: 0)
         let box = ResultBox()
-        // AUX4_COMPUTER_MAC_OCR_DELAY_MS simulates a slow recognition pass, to test that it can't hold
-        // 'wait' past --timeout.
-        let delay = Double(ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_OCR_DELAY_MS"] ?? "") ?? 0
+        // (AUX4_COMPUTER_MAC_OCR_DELAY_MS, applied in recognizeText, simulates a slow pass.)
         DispatchQueue.global(qos: .userInitiated).async {
-            if delay > 0 { usleep(useconds_t(min(delay, 60_000) * 1000)) }
             let lines = recognizeText(image, level: "accurate", languages: [], filter: filter, keepUnmatched: true)
             box.set(lines)
             self.lock.lock(); self.busy = false; self.lock.unlock()
@@ -1973,7 +2174,7 @@ func captureWithin(_ seconds: Double, pid: pid_t?) async -> (CapturedPixels?, Bo
             let pixels = await capturePixels(pid: pid)
             if gate.claim() { cont.resume(returning: (pixels, false)) }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + max(seconds, 0)) {
+        afterStrict(seconds) {
             if gate.claim() { cont.resume(returning: (nil, true)) }
         }
     }
@@ -2078,6 +2279,17 @@ final class WaitOutcome: @unchecked Sendable {
             seen["ocrPending"] = true
             err["seen"] = seen
         }
+        // Recognition was cut short mid-pass (a cold first pass): finish it in the background so the
+        // next OCR is fast.
+        if RecognitionState.shared.inProgress {
+            var notes = err["notes"] as? [String] ?? []
+            notes.append(ocrWarmupNote)
+            err["notes"] = notes
+            if spawnOCRWarmup(), var seen = err["seen"] as? [String: Any] {
+                seen["ocrWarmup"] = true
+                err["seen"] = seen
+            }
+        }
         failJSON(err)
     }
 
@@ -2164,7 +2376,7 @@ func cmdWait(_ args: [String]) async {
     let deadline = start.addingTimeInterval(timeout)
     // Hard deadline: whatever is in flight (an app that stopped answering, a stalled capture), the
     // timeout error is printed at --timeout.
-    DispatchQueue.global().asyncAfter(deadline: .now() + timeout + 0.1) { outcome.timeOut() }
+    afterStrict(timeout + 0.05) { outcome.timeOut() }
 
     while true {
         var tick = WaitTick()
@@ -2298,6 +2510,7 @@ case "ocr":
 case "wait":
     _ = NSApplication.shared
     await cmdWait(rest)
+case "ocr-warmup": cmdOcrWarmup()
 case "clipboard-read": cmdClipboardRead()
 case "clipboard-copy": cmdClipboardCopy(rest)
 case "clipboard-paste": cmdClipboardPaste(rest)

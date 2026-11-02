@@ -87,7 +87,7 @@
         {
           "name": "ocr",
           "execute": [
-            "${packageDir}/aux4-computer-mac ocr values(app, image, text, level, languages, mode, scale)"
+            "${packageDir}/aux4-computer-mac ocr values(app, image, text, level, languages, mode, scale, timeout)"
           ],
           "help": {
             "text": "Recognize text on the screen, an app's window or a PNG, with positions in click coordinates",
@@ -135,6 +135,11 @@
                 "name": "scale",
                 "text": "With --image: image pixels per point (the 'scale' from 'screenshot'), so positions come out in points",
                 "default": "1"
+              },
+              {
+                "name": "timeout",
+                "text": "Give up with a JSON error after this long, e.g. 30s, 2m (default 60s: the first recognition after installing or updating takes about 30s)",
+                "default": "60s"
               }
             ]
           }

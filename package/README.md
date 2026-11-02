@@ -115,7 +115,7 @@ its `scale`) can all be passed to `click --app --x --y`.
 ### Reading text from pixels
 
 ```bash
-aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [--level accurate|fast] [--languages en-US,pt-BR]
+aux4 computer mac ocr [--app "Calculator"] [--image file.png] [--text "1,792"] [--level accurate|fast] [--languages en-US,pt-BR] [--timeout 60s]
 ```
 
 `ocr` recognizes text on this Mac (no network, nothing to download) in the main display, in an app's
@@ -136,6 +136,17 @@ aux4 computer mac ocr --app Calculator --text "1,792"
 **Note:** very small or low-contrast text can be missed or misread, and `--level fast` is much weaker
 than the default `accurate` (on light-on-dark UIs it may find nothing). Check `confidence`, and prefer
 `find` when the app exposes the element.
+
+`ocr` never runs past `--timeout` (default `60s`): it exits `1` with a JSON error on stderr, e.g.
+`{"error":"Text recognition did not finish within 60s","phase":"recognition",...}`, and puts back the
+frontmost app if it had brought one forward. A screen capture that doesn't respond within 10s fails
+with `{"error":"Screen capture did not respond within 10s","phase":"capture"}`.
+
+**Note:** on a Mac with a Neural Engine, the first recognition after installing or updating the package
+takes about 30s while macOS prepares its text models; after that each call takes a fraction of a
+second. It takes longer while macOS's Neural Engine compiler is busy with other requests. If a call
+times out during that preparation, the error says so (`note`), and the preparation finishes in the
+background (`"warmup":true`) so the next call is fast.
 
 ### Waiting for something to appear
 

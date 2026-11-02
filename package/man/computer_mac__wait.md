@@ -25,12 +25,15 @@ Text matching ignores case, whitespace and commas, so `--text 1792` matches `1,7
   pixels (no `--role`). In `auto`, OCR is skipped when Screen Recording isn't granted (noted in `notes`).
 - **`--timeout`** — how long to wait: `500ms`, `10s`, `2m`, or a number of seconds (default `10s`).
 - **`--interval`** — the pause between checks (default `500ms`). Checks never overlap: an OCR check
-  can take a few hundred milliseconds, and the next one starts an interval after it finishes. The very
-  first text recognition after the Mac has been idle can take much longer while the system loads its
-  models, and a screen capture can stall when several processes capture at once. `wait` bounds both,
-  keeps checking the accessibility tree meanwhile, and always stops at `--timeout`, whatever is still
-  in flight. `seen.ocrPending` is `true` when recognition was still running, and `seen.ocrUnavailable`
-  says why OCR couldn't read the window (for example `screen capture did not respond`).
+  can take a few hundred milliseconds, and the next one starts an interval after it finishes. The first
+  text recognition after installing or updating the package takes about 30s on a Mac with a Neural
+  Engine while macOS prepares its text models (longer while its Neural Engine compiler is busy), and a
+  screen capture can stall when several processes capture at once. `wait` bounds both, keeps checking
+  the accessibility tree meanwhile, and always stops at `--timeout`, whatever is still in flight.
+  `seen.ocrPending` is `true` when recognition was still running, and `seen.ocrUnavailable` says why
+  OCR couldn't read the window (for example `screen capture did not respond`). When the timeout cut
+  that model preparation short, `notes` says so and `seen.ocrWarmup` is `true`: it finishes in the
+  background, so the next OCR check is fast.
 
 `wait` only reads: it never moves the cursor, never brings an app forward, and only reads a window with
 OCR while it is on screen (covered is fine; hidden or on another Space is not seen). It needs the
