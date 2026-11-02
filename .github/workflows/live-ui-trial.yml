@@ -88,9 +88,17 @@ jobs:
           done
 
           sleep 0.5
+          # Older Calculators show "1792", newer ones group digits as "1,792".
           RESULT=$(aux4 computer mac find "1,792" --app Calculator)
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            RESULT=$(aux4 computer mac find "1792" --app Calculator)
+          fi
           echo "$RESULT"
-          echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null
+          if ! echo "$RESULT" | jq -e '.matches | length > 0' > /dev/null; then
+            echo "::error::256x7 result not found. Text on Calculator:"
+            aux4 computer mac find "" --role AXStaticText --app Calculator | jq -c '.matches[] | {label, value}'
+            exit 1
+          fi
 
           aux4 computer mac open "TextEdit"
           sleep 1
