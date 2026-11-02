@@ -161,7 +161,8 @@ aux4 computer mac wait --app Calculator --text 1792
 On timeout (`--timeout` takes `500ms`, `10s`, `2m`; default `10s`) it exits `1` with a JSON error on stderr
 naming the condition and what it saw on the last check (the first texts from accessibility and OCR,
 and whether the app was running with a window), so an agent can tell a wrong guess from a slow app.
-`wait` only reads: it never moves the cursor or brings an app forward.
+It always stops at `--timeout`, even when an app stops answering or a screen capture stalls. `wait`
+only reads: it never moves the cursor or brings an app forward.
 
 ### Reading the UI
 

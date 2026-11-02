@@ -146,22 +146,45 @@ aux4 computer mac wait --text Save --app ThisAppDoesNotExist12345 --source ax --
 {"error":"Timed out after 200ms waiting for text 'Save' in ThisAppDoesNotExist12345 to appear","seen":{"running":false,"window":false}}
 ```
 
-## when text recognition is slow
+## when text recognition or screen capture is slow
 
-A first recognition pass can take a long time while the system loads its models;
-`AUX4_COMPUTER_MAC_OCR_DELAY_MS` simulates that.
+A first recognition pass can take a long time while the system loads its models, and a screen
+capture can stall when several processes capture at once. `AUX4_COMPUTER_MAC_OCR_DELAY_MS` simulates
+slow recognition and `AUX4_COMPUTER_MAC_CAPTURE_HANG=1` a capture that never completes.
 
-### should still give up at the timeout
+### should still give up at the timeout when recognition is slow
+
+```timeout
+8000
+```
 
 ```execute
-AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 1s 2>&1 | jq -c '{bounded: (.waited < 2.5), ocrPending: .seen.ocrPending}'
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 1s 2>&1 | jq -c '{bounded: (.waited < 1.6), slow: (.seen.ocrPending == true or .seen.ocrUnavailable != null)}'
 ```
 
 ```expect
-{"bounded":true,"ocrPending":true}
+{"bounded":true,"slow":true}
 ```
 
-### with --gone should not count an unfinished check as gone
+### should still give up at the timeout when the capture never completes
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 1500ms 2>&1 | jq -c '{bounded: (.waited < 2), ocrUnavailable: .seen.ocrUnavailable}'
+```
+
+```expect
+{"bounded":true,"ocrUnavailable":"screen capture did not respond"}
+```
+
+### with --source ocr and --gone should not count an unfinished check as gone
+
+```timeout
+8000
+```
 
 ```execute
 AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --gone true --timeout 1s 2>&1 | jq -c '{error}'
@@ -169,6 +192,50 @@ AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that
 
 ```expect
 {"error":"Timed out after 1s waiting for text 'zzq text that is never on screen 0451' to disappear"}
+```
+
+### with --gone in auto should return at once when accessibility has no match, even if recognition is slow
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 1)}'
+```
+
+```expect
+{"matches":[],"quick":true}
+```
+
+### with --gone in auto should return at once when the capture never completes
+
+```timeout
+8000
+```
+
+```execute
+AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 1)}'
+```
+
+```expect
+{"matches":[],"quick":true}
+```
+
+## two waits reading the screen at the same time
+
+### should both stop at their timeout
+
+```timeout
+10000
+```
+
+```execute
+{ aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s & aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s & wait; } 2>&1 | jq -s -c 'map(.waited >= 3 and .waited < 4)'
+```
+
+```expect
+[true,true]
 ```
 
 ## without permissions

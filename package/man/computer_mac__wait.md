@@ -16,17 +16,21 @@ It checks for one condition:
 Text matching ignores case, whitespace and commas, so `--text 1792` matches `1,792` (and `1 792`), and
 `--text "1,792"` matches `1792`. `ocr --text` matches the same way. `find` is a plain case-insensitive match.
 
-- **`--gone true`** — the opposite: wait until the text, element or window is no longer there. A check
-  that couldn't finish (the app stopped responding, or the window couldn't be captured) doesn't count
-  as "gone".
+- **`--gone true`** — the opposite: wait until the text, element or window is no longer there. In `auto`,
+  a complete accessibility check with no match counts as gone unless OCR, when it answers quickly,
+  still sees the text; a slow or unavailable OCR check never makes "gone" impossible. With
+  `--source ocr`, the OCR check has to finish. A check cut short (the app stopped answering) never
+  counts as gone.
 - **`--source`** — `auto` (default) as above; `ax` only reads the accessibility tree; `ocr` only reads
   pixels (no `--role`). In `auto`, OCR is skipped when Screen Recording isn't granted (noted in `notes`).
 - **`--timeout`** — how long to wait: `500ms`, `10s`, `2m`, or a number of seconds (default `10s`).
 - **`--interval`** — the pause between checks (default `500ms`). Checks never overlap: an OCR check
   can take a few hundred milliseconds, and the next one starts an interval after it finishes. The very
   first text recognition after the Mac has been idle can take much longer while the system loads its
-  models; `wait` keeps checking the accessibility tree meanwhile and still stops at `--timeout`
-  (`seen.ocrPending` is `true` when recognition was still running at that point).
+  models, and a screen capture can stall when several processes capture at once. `wait` bounds both,
+  keeps checking the accessibility tree meanwhile, and always stops at `--timeout`, whatever is still
+  in flight. `seen.ocrPending` is `true` when recognition was still running, and `seen.ocrUnavailable`
+  says why OCR couldn't read the window (for example `screen capture did not respond`).
 
 `wait` only reads: it never moves the cursor, never brings an app forward, and only reads a window with
 OCR while it is on screen (covered is fine; hidden or on another Space is not seen). It needs the

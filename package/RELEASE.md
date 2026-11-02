@@ -1,5 +1,16 @@
 # Release Notes
 
+## 0.4.2
+
+- `wait` always stops at `--timeout`: a watchdog prints the timeout error even when something in flight
+  never returns. Each screen capture is bounded too; a capture that stalls (seen with several
+  capturing processes at once) is reported as `seen.ocrUnavailable` and OCR is skipped for the rest of
+  that wait.
+- `wait --gone` in `auto`: a complete accessibility check with no match counts as gone, so a slow or
+  unavailable OCR pass no longer makes it time out; OCR still keeps the text present when it answers
+  quickly and sees it.
+- `wait` no longer busy-spins the CPU between checks.
+
 ## 0.4.1
 
 - `wait`: text recognition runs off the main loop and is bounded per check, so a slow first recognition

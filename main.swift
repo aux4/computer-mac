@@ -516,7 +516,10 @@ func spinRunLoop(_ seconds: Double) {
 // spinRunLoop(until:) turns the run loop until the date has really passed (run(until:) returns
 // early whenever a source fires).
 func spinRunLoop(until date: Date) {
-    while Date() < date { RunLoop.current.run(until: date) }
+    while Date() < date {
+        // With no input sources the run loop returns at once; sleep briefly instead of spinning.
+        if !RunLoop.current.run(mode: .default, before: date) { usleep(20_000) }
+    }
 }
 
 func isFrontmost(_ pid: pid_t) -> Bool {
@@ -1938,50 +1941,144 @@ final class OCRWorker: @unchecked Sendable {
     }
 }
 
-// Returns nil when the pixels couldn't be read this check (no capture, or recognition still running).
-func ocrTick(app: NSRunningApplication?, text: String, maxWait: Double) async -> ([[String: Any]], [String])? {
-    if OCRWorker.shared.isBusy { return nil }
-    let content: SCShareableContent
-    do {
-        content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-    } catch {
+// ResumeGate lets exactly one of several racers resume a continuation.
+final class ResumeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+    func claim() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+struct CapturedPixels: @unchecked Sendable {
+    let image: CGImage
+    let scale: Double
+    let origin: CGPoint
+    let windowOrigin: CGPoint?
+}
+
+// captureWithin captures the app's front window (or the main display) but gives up after `seconds`:
+// a ScreenCaptureKit request can stall and never call back (seen with several capturing processes at
+// once), and an awaited stall would otherwise hold 'wait' forever. Returns nil on timeout via `timedOut`.
+func captureWithin(_ seconds: Double, pid: pid_t?) async -> (CapturedPixels?, Bool) {
+    let hang = ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_CAPTURE_HANG"] == "1"
+    return await withCheckedContinuation { (cont: CheckedContinuation<(CapturedPixels?, Bool), Never>) in
+        let gate = ResumeGate()
+        Task.detached {
+            // AUX4_COMPUTER_MAC_CAPTURE_HANG=1 simulates a capture that never completes.
+            if hang { try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
+            let pixels = await capturePixels(pid: pid)
+            if gate.claim() { cont.resume(returning: (pixels, false)) }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + max(seconds, 0)) {
+            if gate.claim() { cont.resume(returning: (nil, true)) }
+        }
+    }
+}
+
+func capturePixels(pid: pid_t?) async -> CapturedPixels? {
+    guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
         return nil
     }
-    var image: CGImage
-    var scale = 1.0
-    var origin = CGPoint.zero
-    var windowOrigin: CGPoint? = nil
-    if let app = app {
-        guard let win = frontWindow(pid: app.processIdentifier),
+    if let pid = pid {
+        guard let win = frontWindow(pid: pid),
               let scWin = content.windows.first(where: { $0.windowID == win.id }),
-              let captured = try? await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size) else {
+              let (image, scale) = try? await captureForOCR(filter: SCContentFilter(desktopIndependentWindow: scWin), size: win.frame.size) else {
             return nil
         }
-        (image, scale) = captured
-        origin = win.frame.origin
-        windowOrigin = win.frame.origin
-    } else {
-        let mainID = CGMainDisplayID()
-        guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else { return nil }
-        let bounds = CGDisplayBounds(display.displayID)
-        guard let captured = try? await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size) else {
-            return nil
-        }
-        (image, scale) = captured
-        origin = bounds.origin
+        return CapturedPixels(image: image, scale: scale, origin: win.frame.origin, windowOrigin: win.frame.origin)
     }
+    let mainID = CGMainDisplayID()
+    guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else { return nil }
+    let bounds = CGDisplayBounds(display.displayID)
+    guard let (image, scale) = try? await captureForOCR(filter: SCContentFilter(display: display, excludingWindows: []), size: bounds.size) else {
+        return nil
+    }
+    return CapturedPixels(image: image, scale: scale, origin: bounds.origin, windowOrigin: nil)
+}
+
+enum OCRCheck {
+    case read([[String: Any]], [String])
+    case pending                    // recognition from an earlier check is still running
+    case unavailable(String)
+}
+
+// Set once a capture stalls: later checks in this run skip OCR instead of piling up stalled captures.
+final class CaptureHealth: @unchecked Sendable {
+    static let shared = CaptureHealth()
+    private let lock = NSLock()
+    private var stalled = false
+    var isStalled: Bool { lock.lock(); defer { lock.unlock() }; return stalled }
+    func markStalled() { lock.lock(); stalled = true; lock.unlock() }
+}
+
+// ocrTick reads the app's window (or the main display) in the background only: a window that isn't
+// on screen is simply not seen this check — wait never brings an app forward. Capture and recognition
+// are each bounded by `budget` seconds.
+func ocrTick(app: NSRunningApplication?, text: String, budget: Double) async -> OCRCheck {
+    if CaptureHealth.shared.isStalled { return .unavailable("screen capture did not respond") }
+    if OCRWorker.shared.isBusy { return .pending }
+    let (captured, timedOut) = await captureWithin(budget, pid: app?.processIdentifier)
+    if timedOut {
+        CaptureHealth.shared.markStalled()
+        return .unavailable("screen capture did not respond")
+    }
+    guard let px = captured else { return .unavailable("could not capture the window") }
     func toPoints(_ r: CGRect) -> CGRect {
-        return CGRect(x: origin.x + r.origin.x / scale, y: origin.y + r.origin.y / scale,
-                      width: r.width / scale, height: r.height / scale)
+        return CGRect(x: px.origin.x + r.origin.x / px.scale, y: px.origin.y + r.origin.y / px.scale,
+                      width: r.width / px.scale, height: r.height / px.scale)
     }
-    guard let lines = OCRWorker.shared.recognize(image, filter: text, wait: maxWait) else { return nil }
+    guard let lines = OCRWorker.shared.recognize(px.image, filter: text, wait: budget) else { return .pending }
     var matches: [[String: Any]] = []
     var seen: [String] = []
     for line in lines {
         appendSeen(&seen, line.text)
-        if line.matched { matches.append(ocrEntry(line, toPoints: toPoints, windowOrigin: windowOrigin)) }
+        if line.matched { matches.append(ocrEntry(line, toPoints: toPoints, windowOrigin: px.windowOrigin)) }
     }
-    return (matches, seen)
+    return .read(matches, seen)
+}
+
+// WaitOutcome makes sure exactly one result is printed: the polling loop's success or timeout, or the
+// watchdog's timeout when something in flight (an unresponsive app, a stalled capture) holds the loop.
+final class WaitOutcome: @unchecked Sendable {
+    static let shared = WaitOutcome()
+    private let lock = NSLock()
+    private var finished = false
+    private var timeoutError: [String: Any] = [:]
+    private var start = Date()
+
+    func begin(_ initialError: [String: Any]) {
+        lock.lock(); start = Date(); timeoutError = initialError; lock.unlock()
+    }
+
+    func update(_ error: [String: Any]) {
+        lock.lock(); timeoutError = error; lock.unlock()
+    }
+
+    func succeed(_ out: [String: Any]) -> Never {
+        lock.lock()
+        if finished { lock.unlock(); while true { sleep(60) } }
+        finished = true
+        printJSON(out)
+        exit(0)
+    }
+
+    func timeOut() -> Never {
+        lock.lock()
+        if finished { lock.unlock(); while true { sleep(60) } }
+        finished = true
+        var err = timeoutError
+        err["waited"] = round2(Date().timeIntervalSince(start))
+        failJSON(err)
+    }
+
+    func elapsed() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        return Date().timeIntervalSince(start)
+    }
 }
 
 func cmdWait(_ args: [String]) async {
@@ -1990,7 +2087,8 @@ func cmdWait(_ args: [String]) async {
     let appArg = argAt(args, 2)
     let goneArg = argAt(args, 3).lowercased()
     let sourceArg = argAt(args, 4).isEmpty ? "auto" : argAt(args, 4).lowercased()
-    let timeout = parseDuration(argAt(args, 5).isEmpty ? "10s" : argAt(args, 5), name: "timeout")
+    let timeoutText = argAt(args, 5).isEmpty ? "10s" : argAt(args, 5)
+    let timeout = parseDuration(timeoutText, name: "timeout")
     let interval = parseDuration(argAt(args, 6).isEmpty ? "500ms" : argAt(args, 6), name: "interval")
 
     guard goneArg.isEmpty || goneArg == "true" || goneArg == "false" else {
@@ -2023,12 +2121,50 @@ func cmdWait(_ args: [String]) async {
     if !role.isEmpty { condition["role"] = role }
     if !appArg.isEmpty { condition["app"] = appArg }
 
+    var what: String
+    if !text.isEmpty {
+        what = "text '\(text)'" + (role.isEmpty ? "" : " (\(role))")
+    } else if !role.isEmpty {
+        what = "an element with role \(role)"
+    } else {
+        what = "a window of \(appArg)"
+    }
+    if watchesText && !appArg.isEmpty { what += " in \(appArg)" }
+
+    func timeoutError(_ tick: WaitTick?) -> [String: Any] {
+        var seen = tick?.seen ?? [:]
+        if gone, let t = tick {
+            seen["present"] = t.matches.prefix(5).map { m -> String in
+                (m["text"] as? String) ?? (m["title"] as? String).map { "window '\($0)'" } ?? {
+                    let v = m["value"] as? String ?? ""
+                    return v.isEmpty ? (m["label"] as? String ?? "") : v
+                }()
+            }
+            seen["source"] = t.source
+        }
+        var err: [String: Any] = [
+            "error": "Timed out after \(timeoutText) waiting for \(what) to \(gone ? "disappear" : "appear")",
+            "condition": condition,
+            "timeout": round2(timeout),
+            "seen": seen
+        ]
+        if !notes.isEmpty { err["notes"] = notes }
+        return err
+    }
+
+    let outcome = WaitOutcome.shared
+    outcome.begin(timeoutError(nil))
     let start = Date()
-    // Grace for the last check to finish once it has started (one recognition pass).
-    let deadline = start.addingTimeInterval(timeout + 0.5)
-    var last = WaitTick()
+    let deadline = start.addingTimeInterval(timeout)
+    // Hard deadline: whatever is in flight (an app that stopped answering, a stalled capture), the
+    // timeout error is printed at --timeout.
+    DispatchQueue.global().asyncAfter(deadline: .now() + timeout + 0.1) { outcome.timeOut() }
+
     while true {
         var tick = WaitTick()
+        // A check the deadline cut short says little about what's on screen; the timeout error keeps
+        // the last full check's view instead.
+        var cutShort = false
         let app: NSRunningApplication? = appArg.isEmpty ? nil : liveApp(named: appArg)
         let window: WindowInfo? = app.flatMap { frontWindow(pid: $0.processIdentifier) }
         tick.appName = app?.localizedName
@@ -2051,89 +2187,73 @@ func cmdWait(_ args: [String]) async {
             }
         } else if appArg.isEmpty || app != nil {
             var checked: [String] = []
+            // Whether "not found" is trustworthy for --gone. In auto, a complete accessibility check
+            // decides; OCR can still see the text and keep it present, but an OCR check that is slow
+            // or unavailable never makes "gone" impossible. With --source ocr, OCR has to finish.
+            var absentConfirmed = false
             if useAX, let pid = app?.processIdentifier ?? frontmostAppPid() {
                 checked.append("ax")
                 let (matches, seen, complete) = axTick(pid: pid, text: text, role: role, windowOrigin: window?.frame.origin, deadline: deadline)
                 tick.seen["ax"] = seen
-                if !complete { tick.complete = false }
+                if !complete { cutShort = true }
                 if !matches.isEmpty {
                     tick.present = true
                     tick.source = "ax"
                     tick.matches = matches
+                } else if complete {
+                    absentConfirmed = true
                 }
-            }
-            if !tick.present && useOCR && (app == nil || window != nil) {
-                if Date() >= deadline { tick.complete = false }
             }
             if !tick.present && useOCR && (app == nil || window != nil) && Date() < deadline {
                 checked.append("ocr")
-                // Wait for recognition up to a couple of seconds per check (never past the deadline),
-                // so the accessibility checks keep running while a slow pass finishes.
-                let maxWait = min(max(interval, 2.0), deadline.timeIntervalSinceNow)
-                if let (matches, seen) = await ocrTick(app: app, text: text, maxWait: maxWait) {
+                // Bound capture and recognition so the accessibility checks keep their pace; with
+                // --gone in auto the accessibility answer is already in hand, so OCR gets less time.
+                let cap = gone && useAX ? 0.4 : min(max(interval, 1.0), 2.0)
+                let budget = min(cap, deadline.timeIntervalSinceNow)
+                switch await ocrTick(app: app, text: text, budget: budget) {
+                case .read(let matches, let seen):
                     tick.seen["ocr"] = seen
                     if !matches.isEmpty {
                         tick.present = true
                         tick.source = "ocr"
                         tick.matches = matches
+                        absentConfirmed = false
+                    } else if !useAX {
+                        absentConfirmed = true
                     }
-                } else {
-                    tick.complete = false
-                    if OCRWorker.shared.isBusy { tick.seen["ocrPending"] = true }
+                case .pending:
+                    tick.seen["ocrPending"] = true
+                case .unavailable(let reason):
+                    tick.seen["ocrUnavailable"] = reason
                 }
+            } else if !tick.present && useOCR && !useAX && app != nil && window == nil {
+                // OCR only, and the app has no on-screen window: nothing visible to read.
+                absentConfirmed = true
             }
             if !tick.present { tick.source = checked.isEmpty ? (useAX ? "ax" : "ocr") : checked.joined(separator: "+") }
+            tick.complete = absentConfirmed
         } else {
+            // The app isn't running: nothing of it can be shown.
             tick.source = useAX ? (useOCR ? "ax+ocr" : "ax") : "ocr"
         }
-        last = tick
+        if !cutShort { outcome.update(timeoutError(tick)) }
 
-        let elapsed = Date().timeIntervalSince(start)
         if gone ? (!tick.present && tick.complete) : tick.present {
-            var out: [String: Any] = ["waited": round2(elapsed), "source": tick.source, "matches": gone ? [] : tick.matches]
+            var out: [String: Any] = ["waited": round2(Date().timeIntervalSince(start)), "source": tick.source, "matches": gone ? [] : tick.matches]
             if let name = tick.appName { out["app"] = name }
             if !notes.isEmpty { out["notes"] = notes }
-            printJSON(out)
-            return
+            outcome.succeed(out)
         }
-        if elapsed >= timeout { break }
-        // Ticks never overlap: the next one starts an interval after this one finished.
-        // RunLoop.run(until:) returns early whenever a source fires, so keep turning it until the
-        // pause is really over (turning it also keeps NSWorkspace's app list fresh).
-        let resume = Date().addingTimeInterval(min(interval, max(timeout - elapsed, 0)))
-        spinRunLoop(until: resume)
-    }
-
-    let waited = Date().timeIntervalSince(start)
-    var what: String
-    if !text.isEmpty {
-        what = "text '\(text)'" + (role.isEmpty ? "" : " (\(role))")
-    } else if !role.isEmpty {
-        what = "an element with role \(role)"
-    } else {
-        what = "a window of \(appArg)"
-    }
-    if watchesText && !appArg.isEmpty { what += " in \(appArg)" }
-    let timeoutText = argAt(args, 5).isEmpty ? "10s" : argAt(args, 5)
-    var seen = last.seen
-    if gone {
-        seen["present"] = last.matches.prefix(5).map { m -> String in
-            (m["text"] as? String) ?? (m["title"] as? String).map { "window '\($0)'" } ?? {
-                let v = m["value"] as? String ?? ""
-                return v.isEmpty ? (m["label"] as? String ?? "") : v
-            }()
+        // Checks never overlap: the next one starts an interval after this one finished. Turning
+        // the run loop also keeps NSWorkspace's app list fresh. No check starts at the deadline
+        // (it would be cut short at once); the last one was at most an interval earlier.
+        let next = Date().addingTimeInterval(interval)
+        if next >= deadline {
+            spinRunLoop(until: deadline)
+            outcome.timeOut()
         }
-        seen["source"] = last.source
+        spinRunLoop(until: next)
     }
-    var err: [String: Any] = [
-        "error": "Timed out after \(timeoutText) waiting for \(what) to \(gone ? "disappear" : "appear")",
-        "condition": condition,
-        "timeout": round2(timeout),
-        "waited": round2(waited),
-        "seen": seen
-    ]
-    if !notes.isEmpty { err["notes"] = notes }
-    failJSON(err)
 }
 
 // MARK: - entrypoint
