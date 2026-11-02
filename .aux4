@@ -1,0 +1,52 @@
+{
+  "profiles": [
+    {
+      "name": "main",
+      "commands": [
+        {
+          "name": "build",
+          "execute": [
+            "aux4 builder all"
+          ],
+          "help": {
+            "text": "Build the app for all platforms"
+          }
+        },
+        {
+          "name": "builder",
+          "execute": [
+            "profile:builder"
+          ],
+          "help": {
+            "text": "build the app"
+          }
+        }
+      ]
+    },
+    {
+      "name": "builder",
+      "commands": [
+        {
+          "name": "darwin",
+          "execute": [
+            "swiftc -O -target arm64-apple-macosx14.0 -o package/dist/darwin/arm64/aux4-computer-mac main.swift",
+            "swiftc -O -target x86_64-apple-macosx14.0 -o package/dist/darwin/amd64/aux4-computer-mac main.swift"
+          ],
+          "help": {
+            "text": "build the app for darwin (arm64 + amd64)"
+          }
+        },
+        {
+          "name": "all",
+          "execute": [
+            "aux4 builder darwin"
+          ],
+          "help": {
+            "text": "build the app for all platforms"
+          }
+        }
+      ]
+    }
+  ],
+  "version": "null-local"
+}

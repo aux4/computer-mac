@@ -1,0 +1,421 @@
+{
+  "scope": "aux4",
+  "name": "computer-mac",
+  "version": "0.1.0",
+  "description": "Computer-use for AI agents on macOS: screenshot, read the accessibility tree, click, type, keyboard shortcuts, scroll, drag, clipboard and app/window control",
+  "license": "Apache-2.0",
+  "tags": [
+    "aux4",
+    "macos",
+    "computer-use",
+    "accessibility",
+    "automation",
+    "agent"
+  ],
+  "profiles": [
+    {
+      "name": "main",
+      "commands": [
+        {
+          "name": "computer",
+          "execute": [
+            "profile:computer"
+          ],
+          "help": {
+            "text": "Computer-use commands for AI agents"
+          }
+        }
+      ]
+    },
+    {
+      "name": "computer",
+      "commands": [
+        {
+          "name": "mac",
+          "execute": [
+            "profile:computer:mac"
+          ],
+          "help": {
+            "text": "Operate this Mac: screenshot, read, click, type, shortcuts, clipboard, apps/windows"
+          }
+        }
+      ]
+    },
+    {
+      "name": "computer:mac",
+      "commands": [
+        {
+          "name": "permissions",
+          "execute": [
+            "${packageDir}/aux4-computer-mac permissions"
+          ],
+          "help": {
+            "text": "Check Accessibility and Screen Recording permission status"
+          }
+        },
+        {
+          "name": "screenshot",
+          "execute": [
+            "${packageDir}/aux4-computer-mac screenshot values(output, display, app, maxWidth)"
+          ],
+          "help": {
+            "text": "Capture a screenshot of a display or a specific app's window",
+            "variables": [
+              {
+                "name": "output",
+                "text": "File path to save the PNG to (defaults to a temp file)",
+                "default": ""
+              },
+              {
+                "name": "display",
+                "text": "Display index to capture (from 'computer mac screen')",
+                "default": "0"
+              },
+              {
+                "name": "app",
+                "text": "Capture this app's frontmost window instead of a display",
+                "default": ""
+              },
+              {
+                "name": "maxWidth",
+                "text": "Resize down if wider than this, preserving aspect ratio",
+                "default": "1568"
+              }
+            ]
+          }
+        },
+        {
+          "name": "read",
+          "execute": [
+            "${packageDir}/aux4-computer-mac read values(app, depth)"
+          ],
+          "help": {
+            "text": "Read the accessibility tree of the frontmost or named app",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App name to read (defaults to the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "depth",
+                "text": "Maximum tree depth to walk",
+                "default": "10"
+              }
+            ]
+          }
+        },
+        {
+          "name": "find",
+          "execute": [
+            "${packageDir}/aux4-computer-mac find values(text, role, app)"
+          ],
+          "help": {
+            "text": "Find UI elements by text and/or role",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to search for in element label/value",
+                "default": "",
+                "arg": true
+              },
+              {
+                "name": "role",
+                "text": "Filter by AX role, e.g. AXButton",
+                "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App to search (defaults to the frontmost app)",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "click",
+          "execute": [
+            "${packageDir}/aux4-computer-mac click values(x, y, button, count, element, app)"
+          ],
+          "help": {
+            "text": "Click at coordinates or press an accessibility element by ref",
+            "variables": [
+              {
+                "name": "x",
+                "text": "X coordinate in screen points",
+                "default": ""
+              },
+              {
+                "name": "y",
+                "text": "Y coordinate in screen points",
+                "default": ""
+              },
+              {
+                "name": "button",
+                "text": "left or right",
+                "default": "left"
+              },
+              {
+                "name": "count",
+                "text": "Click count (2 for double-click)",
+                "default": "1"
+              },
+              {
+                "name": "element",
+                "text": "Element ref from 'read'/'find' to press instead of x/y",
+                "default": ""
+              },
+              {
+                "name": "app",
+                "text": "App the element ref belongs to (required with --element if not frontmost)",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "move",
+          "execute": [
+            "${packageDir}/aux4-computer-mac move values(x, y)"
+          ],
+          "help": {
+            "text": "Move the mouse cursor to screen coordinates",
+            "variables": [
+              {
+                "name": "x",
+                "text": "X coordinate in screen points"
+              },
+              {
+                "name": "y",
+                "text": "Y coordinate in screen points"
+              }
+            ]
+          }
+        },
+        {
+          "name": "drag",
+          "execute": [
+            "${packageDir}/aux4-computer-mac drag values(x, y, toX, toY)"
+          ],
+          "help": {
+            "text": "Drag the mouse from one point to another",
+            "variables": [
+              {
+                "name": "x",
+                "text": "Start X coordinate"
+              },
+              {
+                "name": "y",
+                "text": "Start Y coordinate"
+              },
+              {
+                "name": "toX",
+                "text": "End X coordinate"
+              },
+              {
+                "name": "toY",
+                "text": "End Y coordinate"
+              }
+            ]
+          }
+        },
+        {
+          "name": "type",
+          "execute": [
+            "${packageDir}/aux4-computer-mac type values(text, delay)"
+          ],
+          "help": {
+            "text": "Type unicode-safe text at the current focus",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to type",
+                "arg": true
+              },
+              {
+                "name": "delay",
+                "text": "Milliseconds to wait before typing (e.g. for a panel to appear)",
+                "default": "0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shortcut",
+          "execute": [
+            "${packageDir}/aux4-computer-mac shortcut values(keys, delay)"
+          ],
+          "help": {
+            "text": "Press a keyboard shortcut, e.g. cmd+shift+4",
+            "variables": [
+              {
+                "name": "keys",
+                "text": "Key combo, e.g. 'cmd+c', 'cmd+shift+4', 'enter', 'escape'",
+                "arg": true
+              },
+              {
+                "name": "delay",
+                "text": "Milliseconds to wait before pressing",
+                "default": "0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "scroll",
+          "execute": [
+            "${packageDir}/aux4-computer-mac scroll values(x, y, dx, dy)"
+          ],
+          "help": {
+            "text": "Scroll at the given position (or current cursor position)",
+            "variables": [
+              {
+                "name": "x",
+                "text": "X coordinate to move the cursor to before scrolling",
+                "default": ""
+              },
+              {
+                "name": "y",
+                "text": "Y coordinate to move the cursor to before scrolling",
+                "default": ""
+              },
+              {
+                "name": "dx",
+                "text": "Horizontal scroll delta in pixels",
+                "default": "0"
+              },
+              {
+                "name": "dy",
+                "text": "Vertical scroll delta in pixels",
+                "default": "0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "cursor",
+          "execute": [
+            "${packageDir}/aux4-computer-mac cursor"
+          ],
+          "help": {
+            "text": "Get the current mouse cursor position"
+          }
+        },
+        {
+          "name": "screen",
+          "execute": [
+            "${packageDir}/aux4-computer-mac screen"
+          ],
+          "help": {
+            "text": "List displays with bounds and scale factor"
+          }
+        },
+        {
+          "name": "apps",
+          "execute": [
+            "${packageDir}/aux4-computer-mac apps"
+          ],
+          "help": {
+            "text": "List running applications"
+          }
+        },
+        {
+          "name": "windows",
+          "execute": [
+            "${packageDir}/aux4-computer-mac windows"
+          ],
+          "help": {
+            "text": "List on-screen windows"
+          }
+        },
+        {
+          "name": "open",
+          "execute": [
+            "${packageDir}/aux4-computer-mac open values(app)"
+          ],
+          "help": {
+            "text": "Open/launch an application by name",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Application name",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "focus",
+          "execute": [
+            "${packageDir}/aux4-computer-mac focus values(app)"
+          ],
+          "help": {
+            "text": "Bring a running application to the foreground",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Application name",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "clipboard",
+          "execute": [
+            "profile:computer:mac:clipboard"
+          ],
+          "help": {
+            "text": "Clipboard commands: copy, paste, read"
+          }
+        }
+      ]
+    },
+    {
+      "name": "computer:mac:clipboard",
+      "commands": [
+        {
+          "name": "copy",
+          "execute": [
+            "${packageDir}/aux4-computer-mac clipboard-copy values(text)"
+          ],
+          "help": {
+            "text": "Copy to the clipboard: with --text, write it directly; without, press cmd+c and return what was copied",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to put on the clipboard; omit to copy the current selection (cmd+c)",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "paste",
+          "execute": [
+            "${packageDir}/aux4-computer-mac clipboard-paste values(text)"
+          ],
+          "help": {
+            "text": "Paste the clipboard into the focused app (cmd+v); with --text, write it to the clipboard first",
+            "variables": [
+              {
+                "name": "text",
+                "text": "Text to put on the clipboard before pasting; omit to paste the current clipboard contents",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "read",
+          "execute": [
+            "${packageDir}/aux4-computer-mac clipboard-read"
+          ],
+          "help": {
+            "text": "Read the current clipboard text (no side effects)"
+          }
+        }
+      ]
+    }
+  ]
+}
