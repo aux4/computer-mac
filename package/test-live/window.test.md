@@ -32,6 +32,7 @@ aux4 computer mac window list TextEdit | jq -c '[.windows[] | select(.title | te
 
 ```execute
 aux4 computer mac window move --app TextEdit --title "computer-mac-open-test" --x 120 --y 140 --mode background | jq -c '{mode, method: .method, x: .after.frame.x, y: .after.frame.y}'
+sleep 0.3
 aux4 computer mac window list TextEdit | jq -c '[.windows[] | select(.title | test("computer-mac-open-test"))][0].frame | {x, y}'
 ```
 
@@ -44,6 +45,7 @@ aux4 computer mac window list TextEdit | jq -c '[.windows[] | select(.title | te
 
 ```execute
 aux4 computer mac window resize --app TextEdit --title "computer-mac-open-test" --width 600 --height 400 --mode background | jq -c '{mode, width: .after.frame.width, height: .after.frame.height}'
+sleep 0.3
 aux4 computer mac window list TextEdit | jq -c '[.windows[] | select(.title | test("computer-mac-open-test"))][0].frame | {width, height}'
 ```
 

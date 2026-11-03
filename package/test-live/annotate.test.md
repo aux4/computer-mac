@@ -44,7 +44,7 @@ true
 
 ```execute
 MARK=$(jq -c '[.marks[] | select(.label == "7")][0]' /tmp/computer-mac-annotate.json)
-echo "$MARK" | jq -c '.scale as $k | ((.windowCenter.x * $k) >= .image.x and (.windowCenter.x * $k) <= (.image.x + .image.width) and (.windowCenter.y * $k) >= .image.y and (.windowCenter.y * $k) <= (.image.y + .image.height))'
+jq -c --argjson m "$MARK" '.scale as $k | (($m.windowCenter.x * $k) >= $m.image.x and ($m.windowCenter.x * $k) <= ($m.image.x + $m.image.width) and ($m.windowCenter.y * $k) >= $m.image.y and ($m.windowCenter.y * $k) <= ($m.image.y + $m.image.height))' /tmp/computer-mac-annotate.json
 ```
 
 ```expect

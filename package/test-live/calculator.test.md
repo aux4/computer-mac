@@ -7,6 +7,19 @@ single-window screenshot regression check and the state shape.
 Calculator's AXButton labels differ by macOS version, so each key below lists its candidates
 separated by `|`; the first one found is pressed.
 
+```timeout
+20000
+```
+
+```beforeAll
+aux4 computer mac open Calculator > /dev/null
+sleep 1
+```
+
+```afterAll
+aux4 computer mac quit Calculator --force true > /dev/null 2>&1 || true
+```
+
 ## permissions
 
 ### should have Accessibility and Screen Recording granted on this runner
@@ -20,19 +33,6 @@ true
 ```
 
 ## 256 x 7 in the background
-
-```timeout
-20000
-```
-
-```beforeAll
-aux4 computer mac open Calculator > /dev/null
-sleep 1
-```
-
-```afterAll
-aux4 computer mac quit Calculator --force true > /dev/null 2>&1 || true
-```
 
 ### should press AC 2 5 6 x 7 in the background and see 1792 before '=' is pressed
 

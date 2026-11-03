@@ -19,14 +19,17 @@ aux4 computer mac quit Calculator --force true > /dev/null 2>&1 || true
 
 ## action log
 
+Test files run alphabetically (annotate, calculator, dialog, editor, menu, ocr, stop, window), so
+only commands from files before this one are guaranteed to be in the log yet.
+
 ### should have logged commands from earlier live tests
 
 ```execute
-aux4 computer mac log --limit 200 | jq -c '[.entries[].command] as $c | {menu: ($c | index("menu") != null), select: ($c | index("select") != null), set: ($c | index("set") != null), dialog: ($c | index("dialog") != null), open: ($c | index("open") != null), windowMove: ($c | index("window move") != null), hide: ($c | index("hide") != null), unhide: ($c | index("unhide") != null), quit: ($c | index("quit") != null)}'
+aux4 computer mac log --limit 200 | jq -c '[.entries[].command] as $c | {menu: ($c | index("menu") != null), select: ($c | index("select") != null), set: ($c | index("set") != null), dialog: ($c | index("dialog") != null), open: ($c | index("open") != null), quit: ($c | index("quit") != null)}'
 ```
 
 ```expect
-{"menu":true,"select":true,"set":true,"dialog":true,"open":true,"windowMove":true,"hide":true,"unhide":true,"quit":true}
+{"menu":true,"select":true,"set":true,"dialog":true,"open":true,"quit":true}
 ```
 
 ## stop switch
