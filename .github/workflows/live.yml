@@ -44,6 +44,12 @@ jobs:
             exit 1
           fi
 
+      - name: Install aux4/test
+        shell: bash
+        run: |
+          npm install -g jest > /dev/null
+          aux4 aux4 pkger install aux4/test
+
       - name: Live UI test (Calculator, TextEdit, menu, dialog, annotate, window, stop)
         shell: bash
         working-directory: package
