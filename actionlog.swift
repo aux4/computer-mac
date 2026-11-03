@@ -2,39 +2,103 @@ import Foundation
 
 // MARK: - action log + stop switch
 //
-// Every command that sends input or changes state appends one JSON line to the action log
-// (~/Library/Logs/aux4-computer-mac/actions.jsonl, rotated at 10MB), and refuses to run while the
-// stop switch is on (a STOP file in ~/Library/Application Support/aux4-computer-mac, or
-// AUX4_COMPUTER_MAC_STOP=1). Read-only commands are never blocked.
+// The stop switch and the action log are SHARED with aux4/computer (the core) and every other
+// computer provider (contract v1), so a direct `aux4 computer mac ...` call can't bypass a stop
+// turned on with `aux4 computer stop`:
+//
+//   state dir   ~/Library/Application Support/aux4-computer  (env AUX4_COMPUTER_STATE_DIR overrides it)
+//   stop switch <state dir>/STOP, or env AUX4_COMPUTER_STOP=1
+//   action log  <state dir>/actions.jsonl (0600, rotated to actions.jsonl.1 at 10MB)
+//
+// Every command that sends input or changes state appends one JSON line to the log and refuses to
+// run while the switch is on. Read-only commands are never blocked.
+//
+// For one release the 0.6 locations keep working: the old STOP file
+// (~/Library/Application Support/aux4-computer-mac/STOP) and AUX4_COMPUTER_MAC_STOP=1 still stop
+// input, and `log` still reads the old ~/Library/Logs/aux4-computer-mac/actions.jsonl. When
+// AUX4_COMPUTER_STATE_DIR is set, only that directory is used (tests never touch the real switch).
 //
 // AUX4_COMPUTER_MAC_LOG_FILE, AUX4_COMPUTER_MAC_STOP_FILE and AUX4_COMPUTER_MAC_LOG_MAX_BYTES
-// relocate/resize them (used by the package's tests).
+// (AUX4_COMPUTER_LOG_MAX_BYTES) relocate/resize them (used by the package's tests).
 
 func envValue(_ name: String) -> String {
     return ProcessInfo.processInfo.environment[name] ?? ""
 }
 
+// envSeam reads a contract environment seam AUX4_COMPUTER_<name>, or its 0.6 alias
+// AUX4_COMPUTER_MAC_<name> (DENY_PERMISSIONS, DRY_RUN, SIMULATE_BACKGROUND, STOP, ...).
+func envSeam(_ name: String) -> String {
+    let generic = envValue("AUX4_COMPUTER_" + name)
+    if !generic.isEmpty { return generic }
+    return envValue("AUX4_COMPUTER_MAC_" + name)
+}
+
+let providerName = "mac"
+
+func stateDirOverridden() -> Bool {
+    return !envValue("AUX4_COMPUTER_STATE_DIR").isEmpty
+}
+
+// sharedStateDir is the directory the core and every provider share for STOP and actions.jsonl.
+func sharedStateDir() -> String {
+    let custom = envValue("AUX4_COMPUTER_STATE_DIR")
+    if !custom.isEmpty { return custom }
+    return NSHomeDirectory() + "/Library/Application Support/aux4-computer"
+}
+
+let legacyStopFile = NSHomeDirectory() + "/Library/Application Support/aux4-computer-mac/STOP"
+let legacyLogFile = NSHomeDirectory() + "/Library/Logs/aux4-computer-mac/actions.jsonl"
+
 func actionLogPath() -> String {
+    if stateDirOverridden() { return sharedStateDir() + "/actions.jsonl" }
     let custom = envValue("AUX4_COMPUTER_MAC_LOG_FILE")
     if !custom.isEmpty { return custom }
-    return NSHomeDirectory() + "/Library/Logs/aux4-computer-mac/actions.jsonl"
+    return sharedStateDir() + "/actions.jsonl"
+}
+
+// legacyLogPaths are older logs `log` still reads (0.6 wrote to its own directory).
+func legacyLogPaths() -> [String] {
+    if stateDirOverridden() || !envValue("AUX4_COMPUTER_MAC_LOG_FILE").isEmpty { return [] }
+    return [legacyLogFile]
+}
+
+// stopFilePaths are every STOP file that stops input; `stop` writes them all, `resume` removes them all.
+func stopFilePaths() -> [String] {
+    if stateDirOverridden() { return [sharedStateDir() + "/STOP"] }
+    let custom = envValue("AUX4_COMPUTER_MAC_STOP_FILE")
+    if !custom.isEmpty { return [custom] }
+    return [sharedStateDir() + "/STOP", legacyStopFile]
 }
 
 func stopFilePath() -> String {
-    let custom = envValue("AUX4_COMPUTER_MAC_STOP_FILE")
-    if !custom.isEmpty { return custom }
-    return NSHomeDirectory() + "/Library/Application Support/aux4-computer-mac/STOP"
+    return stopFilePaths()[0]
 }
 
 func actionLogMaxBytes() -> Int {
-    if let n = Int(envValue("AUX4_COMPUTER_MAC_LOG_MAX_BYTES")), n > 0 { return n }
+    if let n = Int(envSeam("LOG_MAX_BYTES")), n > 0 { return n }
     return 10 * 1024 * 1024
+}
+
+// createPrivateDirectory creates a state/log directory readable only by the user.
+func createPrivateDirectory(_ dir: String) {
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
+                                             attributes: [.posixPermissions: 0o700])
+}
+
+// logTimestamp is the log's ISO 8601 UTC timestamp with milliseconds (same format as the core's).
+func logTimestamp(_ date: Date = Date()) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: date)
 }
 
 // The stop switch: why input is refused right now, or nil when it's allowed.
 func stopReason() -> String? {
+    if envValue("AUX4_COMPUTER_STOP") == "1" { return "AUX4_COMPUTER_STOP=1 is set" }
     if envValue("AUX4_COMPUTER_MAC_STOP") == "1" { return "AUX4_COMPUTER_MAC_STOP=1 is set" }
-    if FileManager.default.fileExists(atPath: stopFilePath()) { return "\(stopFilePath()) exists" }
+    for path in stopFilePaths() where FileManager.default.fileExists(atPath: path) {
+        return "\(path) exists"
+    }
     return nil
 }
 
@@ -116,10 +180,9 @@ final class ActionLog: @unchecked Sendable {
         // A dry run never touches anything: nothing to record.
         if out["dryRun"] as? Bool == true { return }
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var entry: [String: Any] = [
-            "ts": formatter.string(from: start),
+            "ts": logTimestamp(start),
+            "provider": providerName,
             "command": command,
             "args": args,
             "ms": Int(Date().timeIntervalSince(start) * 1000)
@@ -142,7 +205,7 @@ func appendActionLog(_ entry: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }
     let path = actionLogPath()
     let fm = FileManager.default
-    try? fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    createPrivateDirectory((path as NSString).deletingLastPathComponent)
     // Rotate: the current file becomes actions.jsonl.1 (replacing an older one).
     if let attrs = try? fm.attributesOfItem(atPath: path), let size = attrs[.size] as? NSNumber,
        size.intValue + data.count + 1 > actionLogMaxBytes() {
@@ -156,6 +219,7 @@ func appendActionLog(_ entry: [String: Any]) {
     var line = data
     line.append(0x0A)
     line.withUnsafeBytes { buf in _ = write(fd, buf.baseAddress, buf.count) }
+    fchmod(fd, 0o600)
     close(fd)
 }
 
@@ -167,51 +231,58 @@ func cmdLog(_ args: [String]) {
     }
     let path = actionLogPath()
     var lines: [String] = []
+    var paths: [String] = []
     // Newest entries are at the end; when the current file has fewer than asked, the rotated one
-    // supplies the older ones.
-    for file in [path, path + ".1"] {
-        guard lines.count < limit, let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
-        let fileLines = text.split(separator: "\n").map(String.init)
-        lines = Array(fileLines.suffix(limit - lines.count)) + lines
+    // and then the 0.6 log (all older) supply the older ones.
+    for base in [path] + legacyLogPaths() {
+        for file in [base, base + ".1"] {
+            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { continue }
+            paths.append(file)
+            guard lines.count < limit else { continue }
+            let fileLines = text.split(separator: "\n").map(String.init)
+            lines = Array(fileLines.suffix(limit - lines.count)) + lines
+        }
     }
     var entries: [Any] = []
     for line in lines {
-        if let data = line.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: data) {
+        if let data = line.data(using: .utf8), var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if obj["provider"] == nil { obj["provider"] = providerName }
             entries.append(obj)
         }
     }
-    var out: [String: Any] = ["path": path, "entries": entries, "stopped": stopReason() != nil]
+    var out: [String: Any] = ["path": path, "paths": paths, "entries": entries, "stopped": stopReason() != nil]
     if let reason = stopReason() { out["stopReason"] = reason }
     printJSON(out)
 }
 
 func cmdStop() {
-    let path = stopFilePath()
+    let paths = stopFilePaths()
     let fm = FileManager.default
-    try? fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-    let formatter = ISO8601DateFormatter()
-    let content = "stopped at \(formatter.string(from: Date())) by 'aux4 computer mac stop'; 'aux4 computer mac resume' removes this file\n"
-    guard fm.createFile(atPath: path, contents: content.data(using: .utf8)) else {
-        fail("Could not create the stop file at \(path)")
+    let content = "stopped at \(logTimestamp()) by 'aux4 computer mac stop'; 'aux4 computer resume' removes this file\n"
+    for path in paths {
+        createPrivateDirectory((path as NSString).deletingLastPathComponent)
+        guard fm.createFile(atPath: path, contents: content.data(using: .utf8), attributes: [.posixPermissions: 0o600]) else {
+            fail("Could not create the stop file at \(path)")
+        }
     }
-    appendActionLog(["ts": formatter.string(from: Date()), "command": "stop", "args": [:], "result": "ok"])
-    printJSON(["stopped": true, "file": path])
+    appendActionLog(["ts": logTimestamp(), "provider": providerName, "command": "stop", "args": [:], "result": "ok"])
+    printJSON(["stopped": true, "file": paths[0], "files": paths])
 }
 
 func cmdResume() {
-    let path = stopFilePath()
+    let paths = stopFilePaths()
     let fm = FileManager.default
-    if fm.fileExists(atPath: path) {
+    for path in paths where fm.fileExists(atPath: path) {
         do { try fm.removeItem(atPath: path) } catch {
             fail("Could not remove the stop file at \(path): \(error.localizedDescription)")
         }
     }
-    appendActionLog(["ts": ISO8601DateFormatter().string(from: Date()), "command": "resume", "args": [:], "result": "ok"])
-    var out: [String: Any] = ["stopped": false, "file": path]
+    appendActionLog(["ts": logTimestamp(), "provider": providerName, "command": "resume", "args": [:], "result": "ok"])
+    var out: [String: Any] = ["stopped": false, "file": paths[0], "files": paths]
     // The environment switch can't be undone from here: say so instead of claiming input is allowed.
-    if envValue("AUX4_COMPUTER_MAC_STOP") == "1" {
+    if let reason = stopReason() {
         out["stopped"] = true
-        out["stopReason"] = "AUX4_COMPUTER_MAC_STOP=1 is set; unset it to allow input"
+        out["stopReason"] = reason + "; unset it to allow input"
     }
     printJSON(out)
 }
@@ -220,7 +291,7 @@ func cmdResume() {
 func guardStopSwitch(_ command: String) {
     guard let reason = stopReason() else { return }
     failJSON([
-        "error": "Stopped: aux4 computer mac is not sending input or changing state (\(reason)). Run 'aux4 computer mac resume' to allow it again.",
+        "error": "Stopped: aux4 computer mac is not sending input or changing state (\(reason)). Run 'aux4 computer resume' (or 'aux4 computer mac resume') to allow it again.",
         "stopped": true,
         "command": command.replacingOccurrences(of: "-", with: " ")
     ])

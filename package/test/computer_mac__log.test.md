@@ -1,7 +1,7 @@
 # aux4 computer mac log
 
 ```afterAll
-rm -f log-test.jsonl log-test.jsonl.1 log-rotate.jsonl log-rotate.jsonl.1
+rm -rf log-test.jsonl log-test.jsonl.1 log-rotate.jsonl log-rotate.jsonl.1 log-state
 ```
 
 ## argument validation
@@ -91,4 +91,31 @@ AUX4_COMPUTER_MAC_LOG_FILE=$PWD/no-such-log.jsonl aux4 computer mac log | jq -c 
 
 ```expect
 {"entries":[],"stopped":false}
+```
+
+## the shared action log
+
+```beforeEach
+rm -rf log-state
+```
+
+### should record the provider name on every entry
+
+```execute
+AUX4_COMPUTER_STATE_DIR=$PWD/log-state aux4 computer mac click --x 10 --y 20 --app ThisAppDoesNotExist12345 2>/dev/null; AUX4_COMPUTER_STATE_DIR=$PWD/log-state aux4 computer mac log | jq -c '[.entries[] | {provider, command}]'
+```
+
+```expect
+[{"provider":"mac","command":"click"}]
+```
+
+### should write actions.jsonl into AUX4_COMPUTER_STATE_DIR, readable by 'aux4 computer log', mode 0600
+
+```execute
+export AUX4_COMPUTER_STATE_DIR=$PWD/log-state; aux4 computer mac hide ThisAppDoesNotExist12345 2>/dev/null; aux4 computer log | jq -c '[.entries[] | {provider, command, app, result}]'; ls -l log-state/actions.jsonl | cut -c1-10
+```
+
+```expect
+[{"provider":"mac","command":"hide","app":"ThisAppDoesNotExist12345","result":"error"}]
+-rw-------
 ```

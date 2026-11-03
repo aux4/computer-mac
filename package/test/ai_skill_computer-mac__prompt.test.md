@@ -1,20 +1,20 @@
 # aux4 ai skill computer-mac prompt
 
+Deprecated alias of `aux4 ai skill computer prompt` (aux4/computer), kept for one release.
+
 ## printing the skill
 
-### should start with its title and summary
+### should print the aux4/computer skill
 
 ```execute
-aux4 ai skill computer-mac prompt | head -3
+aux4 ai skill computer-mac prompt | head -1
 ```
 
 ```expect
-# Using a Mac with aux4/computer-mac
-
-Drive macOS apps in the background with `aux4 computer mac`: look (state, find, ocr, screenshot --annotate), act by ref, wait.
+# Using a computer with aux4/computer
 ```
 
-### should teach the loop with the commands to run
+### should teach the generic loop followed by the macOS notes
 
 ```execute
 aux4 ai skill computer-mac prompt
@@ -23,24 +23,10 @@ aux4 ai skill computer-mac prompt
 ```expect:partial
 ## The loop
 **
-*aux4 computer mac state --app <App>*
+*aux4 computer state --app <App>*
 **
-*aux4 computer mac screenshot --app <App> --annotate true*
+## Platform notes: mac (aux4/computer-mac)
 **
-*aux4 computer mac wait --app <App> --text "Saved" --timeout 10s*
-```
-
-### should cover background limits, coordinates, safety, permissions and troubleshooting
-
-```execute
-aux4 ai skill computer-mac prompt | grep '^## '
-```
-
-```expect
-## The loop
-## Background and its limits
-## Coordinates
-## Safety
-## Permissions
-## Troubleshooting
+### What works in the background
+**
 ```
