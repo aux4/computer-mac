@@ -71,6 +71,44 @@ AUX4_COMPUTER_MAC_DRY_RUN=1 AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND=unavailable au
 {"error":"Background mode not possible for set: background simulated as unavailable"}
 ```
 
+## silent data-loss warning (document window, background --value edit)
+
+### should warn that a background --value edit does not mark the document edited
+
+```execute
+AUX4_COMPUTER_MAC_DRY_RUN=1 AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 aux4 computer mac set --app TextEdit --element 0.0.0 --value hello
+```
+
+```expect:json
+{
+  "app": "TextEdit",
+  "documentEdited": false,
+  "dryRun": true,
+  "element": {
+    "ref": "0.0.0"
+  },
+  "mode": "background",
+  "warning": "This edit went through Accessibility, not real keystrokes: TextEdit does not mark the document edited, so closing the window now would discard it without asking. Save explicitly first (e.g. 'shortcut cmd+s --app TextEdit' or 'menu --path \"File > Save\" --app TextEdit'), or re-run with --mode foreground to type real keystrokes."
+}
+```
+
+### should not warn for --checked (no text edit involved)
+
+```execute
+AUX4_COMPUTER_MAC_DRY_RUN=1 AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 aux4 computer mac set --app TextEdit --element 0.0.0 --checked true
+```
+
+```expect:json
+{
+  "app": "TextEdit",
+  "dryRun": true,
+  "element": {
+    "ref": "0.0.0"
+  },
+  "mode": "background"
+}
+```
+
 ## errors
 
 ### should error when the app is not running

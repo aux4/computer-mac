@@ -111,3 +111,40 @@ func axSelectAll(_ element: AXUIElement) -> BackgroundOutcome {
     guard let n = count else { return .unavailable("element has no text to select") }
     return axSetSelection(element, start: 0, length: n)
 }
+
+// MARK: - silent data-loss warning (Accessibility text edit in a document window)
+
+// documentWindow walks up from element to the ancestor AXWindow, returning it only when it
+// looks like a document window (exposes AXDocument, i.e. it's backed by a file / NSDocument).
+// A window with no AXDocument (most panels, Calculator, dialogs) isn't one.
+func documentWindow(_ element: AXUIElement) -> AXUIElement? {
+    var current: AXUIElement? = element
+    for _ in 0..<40 {
+        guard let el = current else { return nil }
+        if axRole(el) == kAXWindowRole {
+            return axString(el, kAXDocumentAttribute) != nil ? el : nil
+        }
+        current = axParent(el)
+    }
+    return nil
+}
+
+// documentEditWarning flags the silent-data-loss case: setting text through Accessibility
+// (type/set --value/clipboard paste in the background) changes an element's value, but macOS
+// only marks a document window "edited" (dot in the close button, "keep changes?" sheet on
+// close) when the change comes from real keystrokes or a menu action -- never from
+// AXUIElementSetAttributeValue. So the window's edited flag stays false and closing it discards
+// the text with no prompt. AXModified isn't a standard attribute most apps expose, but when an
+// app does expose it and it already reads true, the app is tracking the edit some other way and
+// there's nothing to warn about.
+func documentEditWarning(_ element: AXUIElement, app: String) -> (documentEdited: Bool, warning: String)? {
+    guard let window = documentWindow(element) else { return nil }
+    if axBool(window, "AXModified") == true { return nil }
+    return (false, documentEditWarningMessage(app))
+}
+
+// documentEditWarningMessage builds the warning text; shared with the AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT
+// dry-run seam so the real and simulated outputs are the same shape.
+func documentEditWarningMessage(_ app: String) -> String {
+    return "This edit went through Accessibility, not real keystrokes: \(app) does not mark the document edited, so closing the window now would discard it without asking. Save explicitly first (e.g. 'shortcut cmd+s --app \(app)' or 'menu --path \"File > Save\" --app \(app)'), or re-run with --mode foreground to type real keystrokes."
+}

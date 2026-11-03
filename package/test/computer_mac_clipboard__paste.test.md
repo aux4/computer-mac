@@ -43,3 +43,22 @@ AUX4_COMPUTER_MAC_DRY_RUN=1 AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND=unavailable au
   "pasted": "hello"
 }
 ```
+
+## silent data-loss warning (document window, background paste)
+
+### should warn that a background accessibility paste does not mark the document edited
+
+```execute
+AUX4_COMPUTER_MAC_DRY_RUN=1 AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 aux4 computer mac clipboard paste --text "hello" --app TextEdit
+```
+
+```expect:json
+{
+  "app": "TextEdit",
+  "documentEdited": false,
+  "dryRun": true,
+  "mode": "background",
+  "pasted": "hello",
+  "warning": "This edit went through Accessibility, not real keystrokes: TextEdit does not mark the document edited, so closing the window now would discard it without asking. Save explicitly first (e.g. 'shortcut cmd+s --app TextEdit' or 'menu --path \"File > Save\" --app TextEdit'), or re-run with --mode foreground to type real keystrokes."
+}
+```

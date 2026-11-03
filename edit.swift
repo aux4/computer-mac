@@ -132,6 +132,10 @@ func cmdSet(_ args: [String]) {
     var base: [String: Any] = ["element": ["ref": elementRef]]
     if !appArg.isEmpty { base["app"] = appArg }
     if isDryRun() {
+        if !value.isEmpty && simulatedDocumentEdit() {
+            base["documentEdited"] = false
+            base["warning"] = documentEditWarningMessage(appArg.isEmpty ? "the app" : appArg)
+        }
         runAction("set", mode: mode, base: base, plan: .attempt({ .unavailable("dry run") })) { [:] }
         return
     }
@@ -178,7 +182,26 @@ func setValue(_ element: AXUIElement, role: String, _ value: String) -> Backgrou
     }
     usleep(50_000)
     let after = axAnyValue(element, kAXValueAttribute)
-    return .done(["method": "AXValue", "before": truncatedValue(before), "after": truncatedValue(after)])
+    var info: [String: Any] = ["method": "AXValue", "before": truncatedValue(before), "after": truncatedValue(after)]
+    if let w = documentEditWarning(element, app: appNameFor(element) ?? role) {
+        info["documentEdited"] = w.documentEdited
+        info["warning"] = w.warning
+    }
+    return .done(info)
+}
+
+// appNameFor reads the owning application's name for an element, for the warning message
+// ("shortcut cmd+s --app <name>"). Walks up to the AXApplication ancestor.
+func appNameFor(_ element: AXUIElement) -> String? {
+    var current: AXUIElement? = element
+    for _ in 0..<40 {
+        guard let el = current else { return nil }
+        if axRole(el) == kAXApplicationRole {
+            return axString(el, kAXTitleAttribute)
+        }
+        current = axParent(el)
+    }
+    return nil
 }
 
 func truncatedValue(_ v: AnyObject?) -> Any {
