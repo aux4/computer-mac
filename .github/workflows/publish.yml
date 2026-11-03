@@ -41,8 +41,6 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    env:
-      AUX4_REGISTRY_URL: ${{ github.ref_name != 'main' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -56,13 +54,23 @@ jobs:
   test-darwin:
     needs: [lint]
     runs-on: macos-14
-    # aux4/computer (a dependency) only reaches the prod hub when it is promoted: install
-    # dependencies from the dev hub everywhere but main.
-    env:
-      AUX4_REGISTRY_URL: ${{ github.ref_name != 'main' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      # aux4/computer (a dependency) only reaches the prod hub when it is promoted, so off main
+      # install it from the dev hub first; the test step below then finds it already installed
+      # (aux4 and pkger too) and installs everything else from the prod hub as usual.
+      - name: Install aux4/computer from the dev hub
+        if: github.ref_name != 'main'
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aux4.config/packages/aux4/aux4:$PATH"
+          curl -fsSL https://pkger.aux4.sh | sh
+          AUX4_REGISTRY_URL=https://dev.api.hub.aux4.io/v1/packages aux4 aux4 pkger install aux4/computer
+          aux4 aux4 pkger list
 
       - name: Test
         uses: aux4/action@v1
