@@ -11,9 +11,13 @@ e.g. right after a panel opens.
 - **With `--app`** (`--mode auto`, the default) the shortcut is run **in the background** when possible:
   if the app has an enabled menu item with that key equivalent (e.g. `cmd+1` → View > Basic in Calculator), that item is
   pressed through Accessibility; if the app is already frontmost, the keystrokes are sent to that app
-  only. Shortcuts that act on the focused text (`cmd+a`, `cmd+z`, …) are disabled in a background app's
-  menus, so for those `auto` falls back to real input: the app is brought forward, the shortcut pressed,
-  and the cursor and previously frontmost app restored. `--mode background` errors instead of falling back.
+  only. `cmd+a` selects all the text of the app's focused element through Accessibility (as
+  `select --all true` does), so it works in the background too. Other shortcuts that act on the focused
+  text (`cmd+z`, …) are disabled in a background app's menus, so for those `auto` falls back to real
+  input: the app is brought forward, the shortcut pressed, and the cursor and previously frontmost app
+  restored. `--mode background` errors instead of falling back.
+- With `--app`, the app may be given by bundle id (`com.apple.TextEdit`). Recorded in the action log;
+  refused while the stop switch is on.
 
 #### Usage
 

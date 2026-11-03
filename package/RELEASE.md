@@ -1,5 +1,35 @@
 # Release Notes
 
+## 0.5.1
+
+- `dialog --press` reports the title of the button it pressed (it was empty once the dialog closed).
+- `dialog` reports a "keep this new document?" sheet with a Save As name field as `save-panel`.
+- `set --checked` never repeats a press that didn't change the state (it could toggle a control back
+  when the app acted on it without updating its state); in `auto` that case is retried with the app in front.
+- The action log records `click`'s accessibility action as its `method`.
+
+## 0.5.0
+
+- `state`: one call with the frontmost app, the target app (pid, bundle id, hidden), its windows, the
+  focused element, the open dialog and a compact, capped tree of its actionable and text elements.
+- `menu`: list an app's menu bar as a tree (title, ref, checked, shortcut, enabled, children), or press an
+  item by path (`--path 'Format > Font > Bold'`) in the background; unmatched titles list what's available.
+- `select`: select text through Accessibility in the background (`--all true`, `--text` with
+  `--occurrence`, or `--start`/`--length`), returning the selected text and range. `shortcut cmd+a --app`
+  now selects all in the background the same way.
+- `set`: set a text field/area or slider value, a checkbox state, or a pop-up/combo box/radio group option
+  on an element by ref; returns the value before and after.
+- `dialog`: detect an alert, sheet, dialog, system alert or save/open panel (kind, title, text, buttons with
+  default/cancel flags, fields); `--press` a button by title.
+- `open`: `--file` and `--url` (in `--app` or the default app), `--wait <timeout>` for the app's (or the
+  file's) window with its frame, `--hidden true`; output includes pid and bundle id.
+- `--app` accepts bundle ids (`com.apple.TextEdit`) everywhere.
+- Action log: every input/state command appends a JSON line to
+  `~/Library/Logs/aux4-computer-mac/actions.jsonl` (typed text truncated, rotated at 10MB); `log` shows the
+  latest entries.
+- Stop switch: `stop` / `resume`, or `AUX4_COMPUTER_MAC_STOP=1`; while on, every input/state command
+  refuses with a clear error and read-only commands keep working.
+
 ## 0.4.4
 
 - `ocr`/`wait` timeout notes say what to do when every call is slow (macOS's Neural Engine compiler

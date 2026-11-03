@@ -2,8 +2,9 @@
 
 Computer-use for AI agents on macOS. A native Swift CLI (no Python/Node/cliclick dependency) that lets an
 agent see the screen and act on it: take screenshots, read the text on screen (OCR), wait for something to appear, read the accessibility tree, find and click UI
-elements, type text, press keyboard shortcuts, scroll, drag, control the clipboard, and manage apps and
-windows. All commands print JSON to stdout.
+elements, type text, press keyboard shortcuts, use menus, select text, set fields, answer dialogs, scroll,
+drag, control the clipboard, and manage apps, files and windows. All commands print JSON to stdout, and
+every action is recorded in an action log that a stop switch can halt at once.
 
 It is built to **work alongside the person using the Mac**: actions run in the background by default —
 on an app that isn't in front, without moving the mouse cursor or changing the frontmost app — and fall
@@ -32,8 +33,8 @@ aux4 computer mac permissions
 }
 ```
 
-- **Accessibility** is required for `read`, `find`, `click`, `move`, `drag`, `type`, `shortcut`, `scroll`
-  and `focus`.
+- **Accessibility** is required for `read`, `find`, `state`, `menu`, `select`, `set`, `dialog`, `click`,
+  `move`, `drag`, `type`, `shortcut`, `scroll` and `focus`.
 - **Screen Recording** is required for `screenshot` and `ocr` (except `ocr --image`).
 
 Every command that needs a permission that isn't granted returns a clear JSON error with the exact System
@@ -60,9 +61,13 @@ Pass `--app <name>` to target an app that isn't in front; without it, the frontm
 | `type` | Inserts the text at the app's text cursor via Accessibility | The focused element doesn't accept text that way |
 | `clipboard copy` | Reads the app's selected text and puts it on the clipboard | The app doesn't expose its selection or an enabled Copy menu item |
 | `clipboard paste` | Inserts the clipboard text at the app's text cursor | The focused element doesn't accept text that way |
-| `shortcut --app` | Presses the app's enabled menu item for that shortcut, or sends the keys to the app if it's already in front | No enabled menu item — e.g. `cmd+a`/`cmd+z` in a background app |
+| `shortcut --app` | Presses the app's enabled menu item for that shortcut, or sends the keys to the app if it's already in front; `cmd+a` selects the focused text via Accessibility | No enabled menu item — e.g. `cmd+z` in a background app |
+| `menu --path` | Presses the menu item via Accessibility, without opening the menu | The item is disabled while the app is in the background (Close, Undo, Copy…) |
+| `select` | Sets the text selection of the focused (or given) element via Accessibility | The element doesn't take an accessibility selection (`--all` then presses `cmd+a`) |
+| `set` | Sets the value / presses the checkbox / picks the option via Accessibility | The app refuses the change while in the background (retried in front) |
+| `dialog --press` | Presses the dialog's button via Accessibility | The button can't be pressed in the background (pressed in front) |
 | `scroll` | Moves the scroll area's scroll bar via Accessibility (or posts the scroll to the app with `--app`) | No scroll area at the point and no `--app` |
-| `open` | Launches without activating; leaves an already-running app as it is | — |
+| `open` | Launches / opens a file or URL without activating; leaves an already-running app as it is | — |
 | `screenshot --app` | Captures the app's window even when covered | — |
 | `ocr --app` | Reads the text in the app's window even when covered | The window isn't on screen (app hidden, window on another Space) |
 
@@ -175,6 +180,22 @@ and whether the app was running with a window), so an agent can tell a wrong gue
 It always stops at `--timeout`, even when an app stops answering or a screen capture stalls. `wait`
 only reads: it never moves the cursor or brings an app forward.
 
+### One call to see where things stand
+
+```bash
+aux4 computer mac state [--app "TextEdit"] [--depth 3] [--limit 120]
+```
+
+`state` returns the frontmost app, the target app (`pid`, `bundleId`, `hidden`), its windows (`title`,
+`frame`, `main`/`focused`/`minimized`), the focused element (shaped like a `find` match), the open dialog if
+any, and a compact tree of the window's actionable and text elements — each with a `ref` to act on. Layout
+groups are skipped, `--depth` counts levels of meaningful elements, and the list is capped (`truncated` and
+a `note` say when there's more). Small enough to hand to an agent on every step.
+
+```json
+{"app":{"bundleId":"com.apple.calculator","frontmost":false,"hidden":false,"name":"Calculator","pid":62830},"dialog":null,"elements":[{"frame":{"height":36,"width":73,"x":609,"y":488},"label":"Edit field","ref":"0.0.0.1.0.1.0","role":"AXStaticText","value":"1,792"},{"frame":{"height":48,"width":48,"x":526,"y":532},"label":"All Clear","ref":"0.0.0.1.0.3","role":"AXButton"}],"frontmost":{"bundleId":"com.anthropic.claudefordesktop","name":"Claude","pid":49456},"windows":[{"frame":{"height":408,"width":230,"x":462,"y":399},"main":true,"ref":"0","title":"Calculator"}]}
+```
+
 ### Reading the UI
 
 ```bash
@@ -201,6 +222,32 @@ aux4 computer mac drag --x 100 --y 200 --toX 400 --toY 200
 Clicking by `--element` (a `ref` from `read`/`find`) presses that element directly. Clicking by
 `--x`/`--y` presses whatever element is at that point, in the background; see the table above for when it
 falls back to a real mouse click. Pass negative scroll deltas with `=` (`--dy=-200`).
+
+### Menus, selections, fields and dialogs
+
+```bash
+aux4 computer mac menu [--app "TextEdit"] [--depth 2]
+aux4 computer mac menu --app "TextEdit" --path "Format > Font > Bold"
+aux4 computer mac select --app "TextEdit" --all true
+aux4 computer mac select --app "TextEdit" --text "aux4" [--occurrence 2]
+aux4 computer mac select --app "TextEdit" --start 0 --length 5 [--element 0.0.0]
+aux4 computer mac set --app "TextEdit" --element 0.0.0 --value "new text"
+aux4 computer mac set --app "System Settings" --element 0.1.3 --checked true
+aux4 computer mac set --app "TextEdit" --element 0.2.4 --option "Helvetica"
+aux4 computer mac dialog [--app "TextEdit"]
+aux4 computer mac dialog --app "TextEdit" --press "Don't Save"
+```
+
+- `menu` lists the menu bar as a tree (`title`, `ref`, `checked`, `shortcut`, `enabled`, `children`), or
+  presses an item by path. Titles match case-insensitively and a trailing `…` is optional; when one doesn't
+  match, the error lists what's available at that level.
+- `select` selects text in the app's focused element (or `--element`) and returns the `selected` text and
+  its `range`; `clipboard copy --app` then copies it, both in the background.
+- `set` sets a text field / text area / slider value, a checkbox state or a pop-up / combo box / radio group
+  option, and returns the value `before` and `after`.
+- `dialog` reports the open alert, sheet, dialog or save/open panel — `kind`, `title`, `text`, `buttons`
+  (with `default`/`cancel` flags) and `fields` — or `null`; `--press` presses a button by title and says
+  whether the dialog `closed`.
 
 ### Keyboard
 
@@ -238,16 +285,51 @@ Text only, for now.
 aux4 computer mac apps
 aux4 computer mac windows
 aux4 computer mac open "TextEdit"
+aux4 computer mac open com.apple.TextEdit --hidden true
+aux4 computer mac open --file ~/notes.txt [--app "TextEdit"] [--wait 10s]
+aux4 computer mac open --url https://aux4.io
 aux4 computer mac focus "TextEdit"
 ```
 
-`open` launches an app without bringing it to the front (`--mode foreground` to bring it forward);
-`focus` always brings it to the front.
+`open` launches an app, or opens a file or URL (in `--app` or the default app), without bringing it to the
+front (`--mode foreground` to bring it forward). `--wait` returns once the app shows a window — the file's
+window with `--file` — including its `frame`; `--hidden true` launches it hidden. `focus` always brings an
+app to the front.
+
+Wherever `--app` is accepted, the app can be given by name or by bundle id (`com.apple.TextEdit`).
+
+## Action log and stop switch
+
+```bash
+aux4 computer mac log [--limit 20]
+aux4 computer mac stop
+aux4 computer mac resume
+```
+
+Every command that sends input or changes state (`click`, `type`, `shortcut`, `scroll`, `drag`, `move`,
+`set`, `select`, `menu --path`, `dialog --press`, `clipboard copy`/`paste`, `open`, `focus`) appends one
+JSON line to `~/Library/Logs/aux4-computer-mac/actions.jsonl` — time, command, app, arguments, mode and
+result or error — including attempts that failed or were refused. Typed text is cut to a short prefix plus
+its length. The file is rotated at 10MB. `log` prints the most recent entries.
+
+`stop` turns on the stop switch (a `STOP` file in `~/Library/Application Support/aux4-computer-mac`): every
+input or state command then refuses with a clear JSON error until `resume`, while read-only commands
+(`state`, `read`, `find`, `screenshot`, `ocr`, `wait`, listing menus or dialogs) keep working. Setting
+`AUX4_COMPUTER_MAC_STOP=1` in an agent's environment stops it the same way.
+
+```json
+{"command":"click","error":"Stopped: aux4 computer mac is not sending input or changing state (/Users/sally/Library/Application Support/aux4-computer-mac/STOP exists). Run 'aux4 computer mac resume' to allow it again.","stopped":true}
+```
 
 ### Example: work in TextEdit without interrupting the user
 
 ```bash
-aux4 computer mac open "TextEdit"
+aux4 computer mac open --file ~/notes.txt --app "TextEdit" --wait 10s
+aux4 computer mac state --app "TextEdit"
+aux4 computer mac select --app "TextEdit" --all true
+aux4 computer mac clipboard copy --app "TextEdit"
+aux4 computer mac menu --app "TextEdit" --path "Format > Make Plain Text"
+aux4 computer mac dialog --app "TextEdit" --press "OK"
 aux4 computer mac type "hello from an agent" --app "TextEdit"
 aux4 computer mac clipboard paste --text " and a pasted line" --app "TextEdit"
 aux4 computer mac screenshot --app "TextEdit"

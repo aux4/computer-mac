@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "computer-mac",
-  "version": "0.4.5",
+  "version": "0.5.1",
   "description": "Computer-use for AI agents on macOS: screenshot, read the accessibility tree, click, type, keyboard shortcuts, scroll, drag, clipboard and app/window control",
   "license": "Apache-2.0",
   "tags": [
@@ -502,24 +502,49 @@
         {
           "name": "open",
           "execute": [
-            "${packageDir}/aux4-computer-mac open values(app, mode)"
+            "${packageDir}/aux4-computer-mac open values(app, mode, file, url, wait, hidden)"
           ],
           "help": {
-            "text": "Open/launch an application by name without bringing it to the front (by default)",
+            "text": "Open an app, a file or a URL without bringing anything to the front (by default); optionally wait for its window",
             "variables": [
               {
                 "name": "app",
-                "text": "Application name",
+                "text": "Application name or bundle id (com.apple.TextEdit); optional with --file/--url (their default app is used)",
+                "default": "",
                 "arg": true
               },
               {
                 "name": "mode",
-                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "text": "auto (default): open without activating, put the frontmost app back if the app activates itself; background: same, error instead of bringing anything forward; foreground: open and activate the app",
                 "default": "auto",
                 "options": [
                   "auto",
                   "background",
                   "foreground"
+                ]
+              },
+              {
+                "name": "file",
+                "text": "File to open (in --app, or its default app)",
+                "default": ""
+              },
+              {
+                "name": "url",
+                "text": "URL to open (in --app, or the default handler), e.g. https://aux4.io",
+                "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Wait up to this long for the app's window (the file's window with --file) and return its frame, e.g. 10s",
+                "default": ""
+              },
+              {
+                "name": "hidden",
+                "text": "Launch the app hidden",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
                 ]
               }
             ]
@@ -539,6 +564,239 @@
                 "arg": true
               }
             ]
+          }
+        },
+        {
+          "name": "state",
+          "execute": [
+            "${packageDir}/aux4-computer-mac state values(app, depth, limit)"
+          ],
+          "help": {
+            "text": "One-call snapshot: frontmost app, the app's windows, focused element, open dialog and a compact tree of its actionable/text elements",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App to describe: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "depth",
+                "text": "Levels of actionable/text elements to include (layout groups don't count; 0 = none)",
+                "default": "3"
+              },
+              {
+                "name": "limit",
+                "text": "Maximum number of elements in the compact tree",
+                "default": "120"
+              }
+            ]
+          }
+        },
+        {
+          "name": "menu",
+          "execute": [
+            "${packageDir}/aux4-computer-mac menu values(app, path, depth, mode)"
+          ],
+          "help": {
+            "text": "List an app's menu bar, or press a menu item by path (e.g. 'Format > Font > Bold'); in the background by default",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose menu bar to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "path",
+                "text": "Menu item to press, titles separated by '>' (case-insensitive, trailing '…' optional); omit to list the menu bar",
+                "default": ""
+              },
+              {
+                "name": "depth",
+                "text": "Menu levels to list: 1 = menu titles, 2 = their items (default), 3+ = submenus",
+                "default": "2"
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "select",
+          "execute": [
+            "${packageDir}/aux4-computer-mac select values(app, all, text, occurrence, start, length, element, mode)"
+          ],
+          "help": {
+            "text": "Select text in the focused (or given) text element through Accessibility; in the background",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App to select in: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "all",
+                "text": "Select all the element's text",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
+                ]
+              },
+              {
+                "name": "text",
+                "text": "Select this text (case-insensitive)",
+                "default": ""
+              },
+              {
+                "name": "occurrence",
+                "text": "Which match of --text to select (1 = first)",
+                "default": ""
+              },
+              {
+                "name": "start",
+                "text": "Start of the range to select (character offset from 0)",
+                "default": ""
+              },
+              {
+                "name": "length",
+                "text": "Length of the range to select (characters)",
+                "default": ""
+              },
+              {
+                "name": "element",
+                "text": "Text element ref from 'find' or 'state' (default: the app's focused element)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "set",
+          "execute": [
+            "${packageDir}/aux4-computer-mac set values(app, element, value, checked, option, mode)"
+          ],
+          "help": {
+            "text": "Set an element: a text field or slider value, a checkbox state or a pop-up option; in the background",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App the element belongs to: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "element",
+                "text": "Element ref from 'find' or 'state'",
+                "default": ""
+              },
+              {
+                "name": "value",
+                "text": "New value for a text field, text area, combo box or slider",
+                "default": ""
+              },
+              {
+                "name": "checked",
+                "text": "true or false: press the checkbox/radio button until it is in that state",
+                "default": ""
+              },
+              {
+                "name": "option",
+                "text": "Option title to pick in a pop-up button, combo box or radio group",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "dialog",
+          "execute": [
+            "${packageDir}/aux4-computer-mac dialog values(app, press, mode)"
+          ],
+          "help": {
+            "text": "Detect an open alert, sheet, dialog or save/open panel (kind, title, text, buttons, fields); --press a button by title",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App to check: name or bundle id (default: the frontmost app, then system alerts)",
+                "default": ""
+              },
+              {
+                "name": "press",
+                "text": "Button to press, by title (case-insensitive, e.g. \"Don't Save\")",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to real input only if that isn't possible; background: never fall back (error instead); foreground: always use real input",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "log",
+          "execute": [
+            "${packageDir}/aux4-computer-mac log values(limit)"
+          ],
+          "help": {
+            "text": "Show the most recent entries of the action log (every input/state command is recorded)",
+            "variables": [
+              {
+                "name": "limit",
+                "text": "Number of recent entries to show",
+                "default": "20"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stop",
+          "execute": [
+            "${packageDir}/aux4-computer-mac stop"
+          ],
+          "help": {
+            "text": "Turn on the stop switch: every command that sends input or changes state refuses until 'resume'"
+          }
+        },
+        {
+          "name": "resume",
+          "execute": [
+            "${packageDir}/aux4-computer-mac resume"
+          ],
+          "help": {
+            "text": "Turn off the stop switch so input and state commands work again"
           }
         },
         {

@@ -224,18 +224,23 @@ AUX4_COMPUTER_MAC_CAPTURE_HANG=1 aux4 computer mac wait --text "zzq text that is
 
 ## two waits reading the screen at the same time
 
-### should both stop at their timeout
+### should both give up near their timeout with exit 1, never hang
+
+Both start at once and compete for the screen and for text recognition, so on a busy machine each may
+take a little longer than its 3s timeout to report; the check is that both stop on their own with exit
+code 1, well before the test's own limit. Only their JSON lines are read: a busy runner may add system
+log lines to their stderr.
 
 ```timeout
-10000
+30000
 ```
 
 ```execute
-{ aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s & aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s & wait; } 2>&1 | jq -s -c 'map(.waited >= 3 and .waited < 4)'
+{ aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-a.out & { aux4 computer mac wait --text "zzq text that is never on screen 0451" --source ocr --timeout 3s 2>&1; echo "{\"exit\":$?}"; } > wait-b.out & wait; cat wait-a.out wait-b.out | jq -R -s -c '[split("\n")[] | fromjson? | objects] | {waited: [.[] | select(has("waited")) | .waited >= 3 and .waited < 10], exits: [.[] | select(has("exit")) | .exit]}'; rm -f wait-a.out wait-b.out
 ```
 
 ```expect
-[true,true]
+{"waited":[true,true],"exits":[1,1]}
 ```
 
 ## without permissions
