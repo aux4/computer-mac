@@ -12,6 +12,10 @@
   quits session processes. `hide` / `unhide` without activating anything.
 - New commands are recorded in the action log (`window move`, ...) and refused while the stop switch is on.
 - AI skill `computer-mac` (`aux4 ai skill computer-mac prompt`): the method for agents using this package.
+- `type`, `set --value` and `clipboard paste`: when a background Accessibility text edit lands inside a
+  document window, the output now adds `"documentEdited": false` and a `"warning"` — macOS doesn't mark
+  that window edited for an Accessibility edit, so closing it discards the text without asking. Save
+  explicitly (`shortcut cmd+s --app <app>` / `menu --path "File > Save"`) or use `--mode foreground`.
 
 ## 0.5.1
 

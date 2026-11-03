@@ -267,7 +267,8 @@ aux4 computer mac dialog --app "TextEdit" --press "Don't Save"
 - `select` selects text in the app's focused element (or `--element`) and returns the `selected` text and
   its `range`; `clipboard copy --app` then copies it, both in the background.
 - `set` sets a text field / text area / slider value, a checkbox state or a pop-up / combo box / radio group
-  option, and returns the value `before` and `after`.
+  option, and returns the value `before` and `after`. With `--value` on a document window, see the silent
+  data-loss note above.
 - `dialog` reports the open alert, sheet, dialog or save/open panel — `kind`, `title`, `text`, `buttons`
   (with `default`/`cancel` flags) and `fields` — or `null`; `--press` presses a button by title and says
   whether the dialog `closed`.
@@ -339,8 +340,10 @@ without activating it and waits for it to exit; an app with unsaved changes may 
 kills it (unsaved changes are lost); force-quitting Finder and quitting the Dock, loginwindow and other session
 processes are refused.
 
-**Note:** text written through Accessibility (`set --value`, or `type` in the background) doesn't mark a document as
-edited, so closing or quitting may discard it without asking. Save first when it matters.
+**Note:** text written through Accessibility (`set --value`, or `type`/`clipboard paste` in the background) doesn't
+mark a document as edited, so closing or quitting may discard it without asking. When this applies, the command's
+output adds `"documentEdited": false` and a `"warning"` telling you to save explicitly
+(`shortcut cmd+s --app <name>` or `menu --path "File > Save"`) or to use `--mode foreground` for real keystrokes.
 
 Wherever `--app` is accepted, the app can be given by name or by bundle id (`com.apple.TextEdit`).
 

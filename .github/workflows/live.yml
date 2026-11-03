@@ -334,7 +334,15 @@ jobs:
           cm hide TextEdit | check hide-again '.changed == false'
           cm unhide TextEdit | check unhide '.hidden == false and .changed == true'
 
-          # close: the file-backed window closes without asking.
+          # silent data-loss warning: setting this file-backed window's text area through
+          # Accessibility in the background does not mark the document edited, so
+          # computer-mac must report documentEdited:false + a save/--mode foreground warning.
+          AREA=$(cm find "" --role AXTextArea --app TextEdit | jq -r '.matches[0].ref')
+          cm set --app TextEdit --element "$AREA" --value "Set silently by aux4/computer-mac CI" --mode background \
+            | check set-warns-silent-edit '.documentEdited == false and (.warning | test("does not mark the document edited")) and .after == "Set silently by aux4/computer-mac CI"'
+
+          # close: the file-backed window closes without asking -- proving the warning was right:
+          # the Accessibility edit above is discarded with no save prompt.
           cm window close --app TextEdit --title "$W" | check window-close '.closed == true and .after == null'
           cm window list TextEdit | check window-closed "[.windows[] | select(.title | test(\"$W\"))] | length == 0"
 

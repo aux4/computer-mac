@@ -653,6 +653,13 @@ func simulatedBackgroundUnavailable() -> Bool {
     return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND"] == "unavailable"
 }
 
+// AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 makes a dry run report the silent-data-loss warning
+// (documentEdited:false + "warning") on type/set/clipboard paste, so the JSON shape is testable
+// headless, without a real document window or Accessibility permission.
+func simulatedDocumentEdit() -> Bool {
+    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT"] == "1"
+}
+
 enum BackgroundOutcome {
     case done([String: Any])
     case unavailable(String)
@@ -1273,6 +1280,10 @@ func cmdType(_ args: [String]) {
     var base: [String: Any] = ["typed": text.count]
     if !appArg.isEmpty { base["app"] = appArg }
     if isDryRun() {
+        if simulatedDocumentEdit() {
+            base["documentEdited"] = false
+            base["warning"] = documentEditWarningMessage(appArg.isEmpty ? "the app" : appArg)
+        }
         runAction("type", mode: mode, base: base, plan: .attempt({ .unavailable("dry run") })) { [:] }
         return
     }
@@ -1283,7 +1294,12 @@ func cmdType(_ args: [String]) {
     }
     let plan: BackgroundPlan = .attempt({
         guard let reason = axInsertText(target, text) else {
-            return .done(["method": "accessibility"])
+            var info: [String: Any] = ["method": "accessibility"]
+            if let focused = focusedElement(target), let w = documentEditWarning(focused, app: target.name) {
+                info["documentEdited"] = w.documentEdited
+                info["warning"] = w.warning
+            }
+            return .done(info)
         }
         // Keystrokes posted to an app only land when it is frontmost (a background app has no
         // key window); either way nothing on screen moves.
@@ -1562,6 +1578,10 @@ func cmdClipboardPaste(_ args: [String]) {
     var base: [String: Any] = ["pasted": pasteText]
     if !appArg.isEmpty { base["app"] = appArg }
     if isDryRun() {
+        if simulatedDocumentEdit() {
+            base["documentEdited"] = false
+            base["warning"] = documentEditWarningMessage(appArg.isEmpty ? "the app" : appArg)
+        }
         runAction("clipboard paste", mode: mode, base: base, plan: .attempt({ .unavailable("dry run") })) { [:] }
         return
     }
@@ -1571,7 +1591,12 @@ func cmdClipboardPaste(_ args: [String]) {
         ? .unavailable("the clipboard has no text to insert via accessibility")
         : .attempt({
             guard let reason = axInsertText(target, pasteText) else {
-                return .done(["method": "accessibility"])
+                var info: [String: Any] = ["method": "accessibility"]
+                if let focused = focusedElement(target), let w = documentEditWarning(focused, app: target.name) {
+                    info["documentEdited"] = w.documentEdited
+                    info["warning"] = w.warning
+                }
+                return .done(info)
             }
             if case .done(let info) = pressShortcutInBackground(target, parseCombo("cmd+v")) {
                 return .done(info)

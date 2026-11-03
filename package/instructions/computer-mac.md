@@ -57,8 +57,11 @@ a fallback; `--mode foreground` to force real input. `focus` and `window raise` 
 - `aux4 computer mac stop` turns on the stop switch: every input/state command is refused until
   `aux4 computer mac resume`. Read-only commands keep working. Respect it; never resume on your own.
 - `aux4 computer mac log` lists what was done (command, app, mode, result).
-- Text written through Accessibility (`set --value`, `type` in the background) doesn't mark a document as edited:
-  closing or quitting can then discard it **without asking**. Save it (`menu --path "File > Save"`) before closing.
+- Text written through Accessibility (`set --value`, `type`/`clipboard paste` in the background) doesn't mark a
+  document as edited: closing or quitting can then discard it **without asking**. When this applies, the command's
+  JSON includes `"documentEdited": false` and a `"warning"` -- save explicitly (`shortcut cmd+s --app <App>` or
+  `menu --path "File > Save"`) before closing, or use `--mode foreground` for real keystrokes. Watch for it in the
+  result; don't assume a background edit is safe to walk away from.
 - Don't quit, close or move the person's windows unless asked. `quit` reports a "save changes?" dialog instead of
   quitting; answer it with `dialog --press` only as the person wants. `quit --force true` loses unsaved work.
 
