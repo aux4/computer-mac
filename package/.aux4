@@ -13,6 +13,9 @@
     "agent",
     "ai-skill"
   ],
+  "dependencies": [
+    "aux4/computer"
+  ],
   "profiles": [
     {
       "name": "main",
@@ -54,6 +57,24 @@
     {
       "name": "computer:mac",
       "commands": [
+        {
+          "name": "info",
+          "execute": [
+            "${packageDir}/aux4-computer-mac info ${packageDir}"
+          ],
+          "help": {
+            "text": "Describe this provider for aux4/computer: provider name, contract version, platform, version, capabilities and permissions (JSON)"
+          }
+        },
+        {
+          "name": "notes",
+          "execute": [
+            "cat ${packageDir}/instructions/notes.md"
+          ],
+          "help": {
+            "text": "macOS specifics for agents (markdown): permissions, background limits, data-loss and OCR gotchas, coordinates"
+          }
+        },
         {
           "name": "permissions",
           "execute": [
@@ -1317,7 +1338,7 @@
             "profile:ai:skill:computer-mac"
           ],
           "help": {
-            "text": "Use a Mac's apps in the background: state, find, ocr, screenshot --annotate, act by ref, wait; background limits, coordinates, the stop switch"
+            "text": "Deprecated alias of the aux4/computer skill (aux4 ai skill computer)"
           }
         }
       ]
@@ -1328,10 +1349,10 @@
         {
           "name": "prompt",
           "execute": [
-            "cat ${packageDir}/instructions/computer-mac.md"
+            "aux4 ai skill computer prompt --provider mac"
           ],
           "help": {
-            "text": "Print the computer-mac method for agents: the state, find, ocr, annotate, act, wait loop, what works in the background, coordinates, safety, permissions and troubleshooting"
+            "text": "Deprecated: prints the aux4/computer skill (aux4 ai skill computer prompt), which includes the macOS notes. Kept for one release"
           }
         }
       ]

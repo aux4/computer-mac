@@ -141,3 +141,25 @@ aux4 computer mac click
 ```error:partial
 Provide --x*?
 ```
+
+## generic test seams (aux4/computer contract)
+
+### should accept AUX4_COMPUTER_DRY_RUN and AUX4_COMPUTER_SIMULATE_BACKGROUND
+
+```execute
+AUX4_COMPUTER_DRY_RUN=1 AUX4_COMPUTER_SIMULATE_BACKGROUND=unavailable aux4 computer mac click --x 100 --y 200 | jq -c '{dryRun, mode, fallback: (.fallbackReason | type)}'
+```
+
+```expect
+{"dryRun":true,"mode":"foreground","fallback":"string"}
+```
+
+### should accept AUX4_COMPUTER_DENY_PERMISSIONS
+
+```execute
+AUX4_COMPUTER_DENY_PERMISSIONS=1 AUX4_COMPUTER_DRY_RUN=1 aux4 computer mac click --x 1 --y 1 2>&1 | jq -r '.error | test("Accessibility permission not granted")'
+```
+
+```expect
+true
+```

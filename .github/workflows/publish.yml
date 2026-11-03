@@ -41,6 +41,8 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      AUX4_REGISTRY_URL: ${{ github.ref_name != 'main' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -54,6 +56,10 @@ jobs:
   test-darwin:
     needs: [lint]
     runs-on: macos-14
+    # aux4/computer (a dependency) only reaches the prod hub when it is promoted: install
+    # dependencies from the dev hub everywhere but main.
+    env:
+      AUX4_REGISTRY_URL: ${{ github.ref_name != 'main' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -63,6 +69,12 @@ jobs:
         with:
           command: test
           build_command: aux4 builder darwin
+
+      # The aux4/computer provider contract suite (headless: dry runs + a temporary state dir).
+      # The test step installed aux4, aux4/test, this package and aux4/computer.
+      - name: Conformance
+        shell: bash
+        run: aux4 computer conformance --provider mac
 
       # The Swift binaries can only be built on macOS, but the publish step of
       # aux4/action runs in Docker, which macOS runners don't have. Hand the

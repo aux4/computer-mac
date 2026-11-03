@@ -53,10 +53,10 @@ func accessibilityGranted() -> Bool {
     return AXIsProcessTrusted()
 }
 
-// AUX4_COMPUTER_MAC_DENY_PERMISSIONS=1 makes every permission check fail, so the
-// missing-permission error paths can be tested without touching the real screen.
+// AUX4_COMPUTER_DENY_PERMISSIONS=1 (alias AUX4_COMPUTER_MAC_DENY_PERMISSIONS) makes every permission
+// check fail, so the missing-permission error paths can be tested without touching the real screen.
 func permissionsDeniedForTesting() -> Bool {
-    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_DENY_PERMISSIONS"] == "1"
+    return envSeam("DENY_PERMISSIONS") == "1"
 }
 
 func screenRecordingGranted() -> Bool {
@@ -66,7 +66,7 @@ func screenRecordingGranted() -> Bool {
 
 func requireAccessibility() {
     // A dry run never touches the UI, so it doesn't need the permission (unless denial is simulated).
-    if ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_DRY_RUN"] == "1" && !permissionsDeniedForTesting() { return }
+    if isDryRun() && !permissionsDeniedForTesting() { return }
     if !accessibilityGranted() {
         fail("Accessibility permission not granted. Open System Settings > Privacy & Security > Accessibility and enable this terminal/app, then re-run. Shortcut: open \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\"")
     }
@@ -80,10 +80,10 @@ func requireScreenRecording() {
 
 // MARK: - permissions command
 
-func cmdPermissions() {
+func permissionsReport() -> [String: Any] {
     let ax = accessibilityGranted()
     let sr = screenRecordingGranted()
-    printJSON([
+    return [
         "accessibility": [
             "granted": ax,
             "guidance": ax ? "Accessibility access is granted." : "Open System Settings > Privacy & Security > Accessibility and enable this terminal/app. Shortcut: open \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\""
@@ -92,6 +92,63 @@ func cmdPermissions() {
             "granted": sr,
             "guidance": sr ? "Screen Recording access is granted." : "Open System Settings > Privacy & Security > Screen Recording and enable this terminal/app. Shortcut: open \"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture\""
         ]
+    ]
+}
+
+func cmdPermissions() {
+    printJSON(permissionsReport())
+}
+
+// MARK: - info (computer provider contract)
+
+// The provider contract version this package implements (aux4/computer refuses a mismatch).
+let providerContract = 1
+
+// cmdInfo describes this provider for aux4/computer: name, contract, platform, version (read from
+// the package's own .aux4), what it can do, and the permission state.
+func cmdInfo(_ args: [String]) {
+    let packageDir = argAt(args, 0)
+    var version = "unknown"
+    if !packageDir.isEmpty,
+       let data = FileManager.default.contents(atPath: packageDir + "/.aux4"),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let v = obj["version"] as? String, !v.isEmpty {
+        version = v
+    }
+    #if arch(arm64)
+    let arch = "arm64"
+    #else
+    let arch = "amd64"
+    #endif
+    let os = ProcessInfo.processInfo.operatingSystemVersion
+    printJSON([
+        "provider": providerName,
+        "package": "aux4/computer-mac",
+        "contract": providerContract,
+        "platform": "darwin/\(arch)",
+        "os": "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+        "version": version,
+        "capabilities": [
+            "background": true,
+            "foregroundFallback": true,
+            "accessibilityTree": true,
+            "ocr": true,
+            "annotate": true,
+            "menu": true,
+            "dialog": true,
+            "select": true,
+            "set": true,
+            "state": true,
+            "wait": true,
+            "window": true,
+            "clipboard": true,
+            "hide": true,
+            "multipleDisplays": true
+        ],
+        "permissions": permissionsReport(),
+        "stateDir": sharedStateDir(),
+        "stopFile": stopFilePath(),
+        "logFile": actionLogPath()
     ])
 }
 
@@ -642,22 +699,23 @@ func parseMode(_ s: String) -> ActionMode {
     return mode
 }
 
-// AUX4_COMPUTER_MAC_DRY_RUN=1 runs the background/foreground decision without touching the
-// screen; AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND=unavailable makes every background attempt
-// fail, so the fallback logic and the JSON shape can be tested headless.
+// AUX4_COMPUTER_DRY_RUN=1 runs the background/foreground decision without touching the
+// screen; AUX4_COMPUTER_SIMULATE_BACKGROUND=unavailable makes every background attempt
+// fail, so the fallback logic and the JSON shape can be tested headless. The 0.6 names
+// AUX4_COMPUTER_MAC_DRY_RUN / AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND keep working.
 func isDryRun() -> Bool {
-    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_DRY_RUN"] == "1"
+    return envSeam("DRY_RUN") == "1"
 }
 
 func simulatedBackgroundUnavailable() -> Bool {
-    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND"] == "unavailable"
+    return envSeam("SIMULATE_BACKGROUND") == "unavailable"
 }
 
 // AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 makes a dry run report the silent-data-loss warning
 // (documentEdited:false + "warning") on type/set/clipboard paste, so the JSON shape is testable
 // headless, without a real document window or Accessibility permission.
 func simulatedDocumentEdit() -> Bool {
-    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT"] == "1"
+    return envSeam("SIMULATE_DOCUMENT_EDIT") == "1"
 }
 
 enum BackgroundOutcome {
@@ -2730,6 +2788,7 @@ if isActionInvocation(command, rest) {
 
 switch command {
 case "permissions": cmdPermissions()
+case "info": cmdInfo(rest)
 case "cursor": cmdCursor()
 case "screen": cmdScreen()
 case "apps": cmdApps()
