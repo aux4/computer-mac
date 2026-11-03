@@ -54,11 +54,11 @@ aux4 computer mac menu --app Calculator | jq -e '[.menus[] | select(.title == "V
 ### should switch back to Basic
 
 ```execute
-BASIC_BEFORE=$(aux4 computer mac find "" --role AXButton --app Calculator | jq '.matches | length')
+SCI_BEFORE=$(aux4 computer mac find "" --role AXButton --app Calculator | jq '.matches | length')
 aux4 computer mac menu --app Calculator --path "view > basic" --mode background | jq -c '{mode, path}'
 sleep 1
 BASIC_AFTER=$(aux4 computer mac find "" --role AXButton --app Calculator | jq '.matches | length')
-jq -n -c --argjson before "$BASIC_BEFORE" --argjson after "$BASIC_AFTER" '($after == $before)'
+jq -n -c --argjson before "$SCI_BEFORE" --argjson after "$BASIC_AFTER" '($after < $before)'
 ```
 
 ```expect:partial

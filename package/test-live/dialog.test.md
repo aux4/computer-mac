@@ -33,10 +33,12 @@ null
 ### should open the save sheet when closing the untitled unsaved document
 
 ```timeout
-12000
+15000
 ```
 
 ```execute
+aux4 computer mac type "Unsaved by aux4/computer-mac CI" --app TextEdit --mode foreground > /dev/null
+aux4 computer mac wait --app TextEdit --text "Unsaved by aux4/computer-mac CI" --source ax --timeout 10s > /dev/null
 CLOSE=$(aux4 computer mac state --app TextEdit | jq -r '[.elements[] | select(.subrole == "AXCloseButton")][0].ref // empty')
 if [ -n "$CLOSE" ]; then
   aux4 computer mac click --element "$CLOSE" --app TextEdit --mode background > /dev/null

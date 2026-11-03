@@ -127,6 +127,10 @@ aux4 computer mac set --app TextEdit --element "$AREA" --value "Set by aux4/comp
 
 ### should exercise a pop-up control if the window has one
 
+```timeout
+10000
+```
+
 ```execute
 POPUP=$(aux4 computer mac find "" --role AXPopUpButton --app TextEdit | jq -c '[.matches[] | select(.value != "")][0] // empty')
 if [ -n "$POPUP" ]; then
@@ -141,6 +145,10 @@ true
 ```
 
 ### should exercise a checkbox control if the window has one
+
+```timeout
+10000
+```
 
 ```execute
 BOX=$(aux4 computer mac find "" --role AXCheckBox --app TextEdit | jq -r '.matches[0].ref // empty')
