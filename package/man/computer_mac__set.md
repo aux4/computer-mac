@@ -18,6 +18,14 @@ brought forward, then the previous frontmost app and cursor are restored. `--mod
 instead. An empty `--value` can't be passed (it means "not given"). Recorded in the action log (with
 `--value` truncated); refused while the stop switch is on. Requires Accessibility.
 
+**Silent data loss with `--value`:** setting an element's value through Accessibility does not mark a
+document window (one with an `AXDocument`, i.e. backed by a file) as edited — macOS only does that for real
+keystrokes or a menu action. The title bar shows no unsaved-changes indicator, and closing the window
+discards the change with no "do you want to save?" prompt. When this applies, the output adds
+`"documentEdited": false` and a `"warning"` telling you to save explicitly
+(`shortcut cmd+s --app <app>` or `menu --path "File > Save" --app <app>`) before closing, or to type real
+keystrokes instead (`type ... --mode foreground`). `--checked` and `--option` don't trigger this warning.
+
 #### Usage
 
 ```bash

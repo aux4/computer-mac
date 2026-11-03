@@ -16,6 +16,14 @@ The output's `mode` says which happened, and `method` how (`accessibility` or `p
 Use `--delay` to wait before typing — useful right after opening a panel (e.g. Spotlight) that needs a
 moment to receive focus.
 
+**Silent data loss:** when `method` is `accessibility` and the focused element lives in a document window
+(one with an `AXDocument`, i.e. backed by a file), macOS does not mark that window edited — unlike real
+keystrokes, which do. The title bar shows no unsaved-changes dot and closing the window discards the typed
+text with no "do you want to save?" prompt. In that case the output adds `"documentEdited": false` and a
+`"warning"` telling you to save explicitly (`shortcut cmd+s --app <app>` or
+`menu --path "File > Save" --app <app>`) or to re-run with `--mode foreground` so real keystrokes mark the
+document edited. This doesn't apply to `method: postToPid`, which is already real keystrokes.
+
 #### Usage
 
 ```bash

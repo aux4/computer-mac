@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "computer-mac",
-  "version": "0.5.2",
+  "version": "0.6.1",
   "description": "Computer-use for AI agents on macOS: screenshot, read the accessibility tree, click, type, keyboard shortcuts, scroll, drag, clipboard and app/window control",
   "license": "Apache-2.0",
   "tags": [
@@ -10,7 +10,8 @@
     "computer-use",
     "accessibility",
     "automation",
-    "agent"
+    "agent",
+    "ai-skill"
   ],
   "profiles": [
     {
@@ -23,6 +24,15 @@
           ],
           "help": {
             "text": "Computer-use commands for AI agents"
+          }
+        },
+        {
+          "name": "ai",
+          "execute": [
+            "profile:ai"
+          ],
+          "help": {
+            "text": "Artificial Intelligence"
           }
         }
       ]
@@ -56,7 +66,7 @@
         {
           "name": "screenshot",
           "execute": [
-            "${packageDir}/aux4-computer-mac screenshot values(output, display, app, maxWidth)"
+            "${packageDir}/aux4-computer-mac screenshot values(output, display, app, maxWidth, annotate, roles, limit)"
           ],
           "help": {
             "text": "Capture a screenshot of a display or a specific app's window",
@@ -80,6 +90,29 @@
                 "name": "maxWidth",
                 "text": "Resize down if wider than this, preserving aspect ratio",
                 "default": "1568"
+              },
+              {
+                "name": "annotate",
+                "text": "Draw a numbered box on each element (set-of-marks) and return the marks: number, ref, role, label, frame, center, windowCenter",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
+                ]
+              },
+              {
+                "name": "roles",
+                "text": "With --annotate: actionable (default: buttons, links, fields, checkboxes, menus, pop-ups, tabs, rows) or all (also text, images, headings, cells)",
+                "default": "actionable",
+                "options": [
+                  "actionable",
+                  "all"
+                ]
+              },
+              {
+                "name": "limit",
+                "text": "With --annotate: most marks to draw (the rest are reported as truncated)",
+                "default": "150"
               }
             ]
           }
@@ -500,6 +533,77 @@
           }
         },
         {
+          "name": "window",
+          "execute": [
+            "profile:computer:mac:window"
+          ],
+          "help": {
+            "text": "List, move, resize, minimize, restore, close, full-screen or raise an app's windows (in the background, except raise)"
+          }
+        },
+        {
+          "name": "quit",
+          "execute": [
+            "${packageDir}/aux4-computer-mac quit values(app, force, timeout)"
+          ],
+          "help": {
+            "text": "Quit an app (reports a 'save changes?' dialog instead of quitting); --force true kills it",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Application name or bundle id",
+                "arg": true
+              },
+              {
+                "name": "force",
+                "text": "Force-quit (unsaved changes are lost; refused for Finder)",
+                "default": "false",
+                "options": [
+                  "false",
+                  "true"
+                ]
+              },
+              {
+                "name": "timeout",
+                "text": "How long to wait for the app to exit, e.g. 5s",
+                "default": "5s"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hide",
+          "execute": [
+            "${packageDir}/aux4-computer-mac hide values(app)"
+          ],
+          "help": {
+            "text": "Hide an app (like cmd+h, without activating anything)",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Application name or bundle id",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "unhide",
+          "execute": [
+            "${packageDir}/aux4-computer-mac unhide values(app)"
+          ],
+          "help": {
+            "text": "Show a hidden app again without bringing it to the front",
+            "variables": [
+              {
+                "name": "app",
+                "text": "Application name or bundle id",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
           "name": "open",
           "execute": [
             "${packageDir}/aux4-computer-mac open values(app, mode, file, url, wait, hidden)"
@@ -811,6 +915,310 @@
       ]
     },
     {
+      "name": "computer:mac:window",
+      "commands": [
+        {
+          "name": "list",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window list values(app)"
+          ],
+          "help": {
+            "text": "List an app's windows (index, ref, title, frame, minimized, fullscreen, main, focused)",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose windows to list: name or bundle id (default: the frontmost app)",
+                "default": "",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "move",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window move values(app, title, index, mode) values(x, y)"
+          ],
+          "help": {
+            "text": "Move a window so its top-left corner is at --x/--y (screen points); returns the frame before and after",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "x",
+                "text": "Screen x of the window's top-left corner (negative: --x=-100)",
+                "default": ""
+              },
+              {
+                "name": "y",
+                "text": "Screen y of the window's top-left corner",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "resize",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window resize values(app, title, index, mode) values(width, height)"
+          ],
+          "help": {
+            "text": "Resize a window to --width/--height (points; give one to keep the other); returns the frame before and after",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "width",
+                "text": "New width in points (default: keep)",
+                "default": ""
+              },
+              {
+                "name": "height",
+                "text": "New height in points (default: keep)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "minimize",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window minimize values(app, title, index, mode)"
+          ],
+          "help": {
+            "text": "Minimize a window to the Dock",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "restore",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window restore values(app, title, index, mode)"
+          ],
+          "help": {
+            "text": "Restore a minimized window (without bringing its app to the front)",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "close",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window close values(app, title, index, mode)"
+          ],
+          "help": {
+            "text": "Close a window with its close button; reports the 'save changes?' sheet if the app asks",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fullscreen",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window fullscreen values(app, title, index, mode) values(enabled)"
+          ],
+          "help": {
+            "text": "Enter or leave full screen (enabled true|false)",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "enabled",
+                "text": "true to enter full screen, false to leave it",
+                "default": "true",
+                "arg": true,
+                "options": [
+                  "true",
+                  "false"
+                ]
+              },
+              {
+                "name": "mode",
+                "text": "auto (default): act in the background, fall back to bringing the app forward only if that isn't possible; background: never fall back (error instead); foreground: bring the app forward first",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "raise",
+          "execute": [
+            "${packageDir}/aux4-computer-mac window raise values(app, title, index, mode)"
+          ],
+          "help": {
+            "text": "Raise a window and bring its app to the front (always real foreground)",
+            "variables": [
+              {
+                "name": "app",
+                "text": "App whose window to use: name or bundle id (default: the frontmost app)",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Window title (exact, then contained; case-insensitive); default: the app's main window",
+                "default": ""
+              },
+              {
+                "name": "index",
+                "text": "Window index from 'window list' (instead of --title)",
+                "default": ""
+              },
+              {
+                "name": "mode",
+                "text": "auto (default) or foreground; background is refused (raising is foreground by nature)",
+                "default": "auto",
+                "options": [
+                  "auto",
+                  "background",
+                  "foreground"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "computer:mac:clipboard",
       "commands": [
         {
@@ -882,6 +1290,48 @@
           ],
           "help": {
             "text": "Read the current clipboard text (no side effects)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai",
+      "commands": [
+        {
+          "name": "skill",
+          "execute": [
+            "profile:ai:skill"
+          ],
+          "help": {
+            "text": "AI skills: methods an agent reads before using a capability"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai:skill",
+      "commands": [
+        {
+          "name": "computer-mac",
+          "execute": [
+            "profile:ai:skill:computer-mac"
+          ],
+          "help": {
+            "text": "Use a Mac's apps in the background: state, find, ocr, screenshot --annotate, act by ref, wait; background limits, coordinates, the stop switch"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai:skill:computer-mac",
+      "commands": [
+        {
+          "name": "prompt",
+          "execute": [
+            "cat ${packageDir}/instructions/computer-mac.md"
+          ],
+          "help": {
+            "text": "Print the computer-mac method for agents: the state, find, ocr, annotate, act, wait loop, what works in the background, coordinates, safety, permissions and troubleshooting"
           }
         }
       ]

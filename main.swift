@@ -653,6 +653,13 @@ func simulatedBackgroundUnavailable() -> Bool {
     return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND"] == "unavailable"
 }
 
+// AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT=1 makes a dry run report the silent-data-loss warning
+// (documentEdited:false + "warning") on type/set/clipboard paste, so the JSON shape is testable
+// headless, without a real document window or Accessibility permission.
+func simulatedDocumentEdit() -> Bool {
+    return ProcessInfo.processInfo.environment["AUX4_COMPUTER_MAC_SIMULATE_DOCUMENT_EDIT"] == "1"
+}
+
 enum BackgroundOutcome {
     case done([String: Any])
     case unavailable(String)
@@ -1273,6 +1280,10 @@ func cmdType(_ args: [String]) {
     var base: [String: Any] = ["typed": text.count]
     if !appArg.isEmpty { base["app"] = appArg }
     if isDryRun() {
+        if simulatedDocumentEdit() {
+            base["documentEdited"] = false
+            base["warning"] = documentEditWarningMessage(appArg.isEmpty ? "the app" : appArg)
+        }
         runAction("type", mode: mode, base: base, plan: .attempt({ .unavailable("dry run") })) { [:] }
         return
     }
@@ -1283,7 +1294,12 @@ func cmdType(_ args: [String]) {
     }
     let plan: BackgroundPlan = .attempt({
         guard let reason = axInsertText(target, text) else {
-            return .done(["method": "accessibility"])
+            var info: [String: Any] = ["method": "accessibility"]
+            if let focused = focusedElement(target), let w = documentEditWarning(focused, app: target.name) {
+                info["documentEdited"] = w.documentEdited
+                info["warning"] = w.warning
+            }
+            return .done(info)
         }
         // Keystrokes posted to an app only land when it is frontmost (a background app has no
         // key window); either way nothing on screen moves.
@@ -1562,6 +1578,10 @@ func cmdClipboardPaste(_ args: [String]) {
     var base: [String: Any] = ["pasted": pasteText]
     if !appArg.isEmpty { base["app"] = appArg }
     if isDryRun() {
+        if simulatedDocumentEdit() {
+            base["documentEdited"] = false
+            base["warning"] = documentEditWarningMessage(appArg.isEmpty ? "the app" : appArg)
+        }
         runAction("clipboard paste", mode: mode, base: base, plan: .attempt({ .unavailable("dry run") })) { [:] }
         return
     }
@@ -1571,7 +1591,12 @@ func cmdClipboardPaste(_ args: [String]) {
         ? .unavailable("the clipboard has no text to insert via accessibility")
         : .attempt({
             guard let reason = axInsertText(target, pasteText) else {
-                return .done(["method": "accessibility"])
+                var info: [String: Any] = ["method": "accessibility"]
+                if let focused = focusedElement(target), let w = documentEditWarning(focused, app: target.name) {
+                    info["documentEdited"] = w.documentEdited
+                    info["warning"] = w.warning
+                }
+                return .done(info)
             }
             if case .done(let info) = pressShortcutInBackground(target, parseCombo("cmd+v")) {
                 return .done(info)
@@ -1627,19 +1652,32 @@ func cmdScreenshot(_ args: [String]) async {
     let displayArg = argAt(args, 1)
     let appArg = argAt(args, 2)
     let maxWidth = parseInt(argAt(args, 3), default: 1568)
+    let annotate = parseBoolFlag(argAt(args, 4), name: "annotate")
+    let rolesArg = argAt(args, 5).isEmpty ? "actionable" : argAt(args, 5).lowercased()
+    let limitArg = argAt(args, 6)
+    let markLimit = limitArg.isEmpty ? 150 : (Int(limitArg) ?? -1)
+    guard rolesArg == "actionable" || rolesArg == "all" else {
+        fail("Invalid --roles '\(argAt(args, 5))': use actionable or all")
+    }
+    guard markLimit > 0 else {
+        fail("Invalid --limit '\(limitArg)': use a positive number")
+    }
 
     var appWindow: WindowInfo? = nil
     var appName = ""
+    var appPid: pid_t? = nil
     if !appArg.isEmpty {
         guard let app = findRunningApp(named: appArg) else {
             fail("App not running: \(appArg)")
         }
+        appPid = app.processIdentifier
         appName = app.localizedName ?? appArg
         guard let win = frontWindow(pid: app.processIdentifier) else {
             fail("No on-screen window found for app: \(appArg)")
         }
         appWindow = win
     }
+    if annotate { requireAccessibility() }
     requireScreenRecording()
 
     let content: SCShareableContent
@@ -1650,7 +1688,10 @@ func cmdScreenshot(_ args: [String]) async {
     }
 
     var image: CGImage?
+    // The captured area in screen points: what the annotation marks are placed against.
+    var region = CGRect.zero
     if let target = appWindow {
+        region = target.frame
         guard let win = content.windows.first(where: { $0.windowID == target.id }) else {
             fail("No capturable window found for app: \(appArg)")
         }
@@ -1666,6 +1707,7 @@ func cmdScreenshot(_ args: [String]) async {
             fail("Invalid display index: \(displayArg)")
         }
         let display = content.displays[displayIndex]
+        region = display.frame
         let filter = SCContentFilter(display: display, excludingWindows: [])
         do {
             image = try await captureImage(filter: filter, width: display.width, height: display.height)
@@ -1678,7 +1720,21 @@ func cmdScreenshot(_ args: [String]) async {
         fail("Failed to capture screenshot")
     }
 
-    let resized = resizeImage(cgImage, maxWidth: maxWidth)
+    var resized = resizeImage(cgImage, maxWidth: maxWidth)
+    var annotation: [String: Any]? = nil
+    if annotate {
+        // A display capture is annotated with the frontmost app's windows on it.
+        guard let pid = appPid ?? frontmostAppPid() else {
+            fail("No frontmost application to annotate: pass --app")
+        }
+        let result = annotateScreenshot(resized, region: region, capturedWindow: appWindow?.frame, pid: pid,
+                                        roles: rolesArg, limit: markLimit)
+        resized = result.image
+        annotation = result.out
+        if appWindow == nil, let app = NSRunningApplication(processIdentifier: pid) {
+            annotation?["app"] = app.localizedName ?? ""
+        }
+    }
 
     let outputPath: String
     if outputArg.isEmpty {
@@ -1701,6 +1757,9 @@ func cmdScreenshot(_ args: [String]) async {
     if let win = appWindow {
         out["app"] = appName
         out["window"] = ["id": Int(win.id), "title": win.title, "frame": frameJSON(win.frame)]
+    }
+    if let a = annotation {
+        for (k, v) in a { out[k] = v }
     }
     printJSON(out)
 }
@@ -2666,7 +2725,7 @@ let rest = Array(allArgs.dropFirst(2))
 // Input/state commands are recorded in the action log and refused while the stop switch is on.
 if isActionInvocation(command, rest) {
     ActionLog.shared.begin(command, rest)
-    guardStopSwitch(command)
+    guardStopSwitch(command == "window" ? "window " + argAt(rest, 0).lowercased() : command)
 }
 
 switch command {
@@ -2708,6 +2767,10 @@ case "dialog": cmdDialog(rest)
 case "log": cmdLog(rest)
 case "stop": cmdStop()
 case "resume": cmdResume()
+case "window": cmdWindow(rest)
+case "quit": cmdQuit(rest)
+case "hide": cmdHide(rest, hide: true)
+case "unhide": cmdHide(rest, hide: false)
 default:
     fail("Unknown command: \(command)")
 }
