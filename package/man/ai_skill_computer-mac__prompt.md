@@ -1,8 +1,9 @@
 #### Description
 
-Prints the `computer-mac` method for agents as markdown: the state, find, ocr, annotate, act, wait loop with the exact
-commands, background limits and fallbacks, coordinates, safety (stop switch, action log, never quitting the person's
-apps), permissions and troubleshooting. It only prints text.
+**Deprecated** — kept for one release. Prints the `aux4/computer` AI skill, exactly like
+`aux4 ai skill computer prompt --provider mac`: the generic method for agents (the state, find, ocr, annotate, act,
+wait loop; background and foreground; coordinates; stop switch, action log and data-loss warnings) followed by this
+package's macOS notes (`aux4 computer mac notes`). Use `aux4 ai skill computer prompt` instead. It only prints text.
 
 #### Usage
 
@@ -13,11 +14,9 @@ aux4 ai skill computer-mac prompt
 #### Example
 
 ```bash
-aux4 ai skill computer-mac prompt
+aux4 ai skill computer-mac prompt | head -1
 ```
 
 ```text
-# Using a Mac with aux4/computer-mac
-
-Drive macOS apps in the background with `aux4 computer mac`: look (state, find, ocr, screenshot --annotate), act by ref, wait.
+# Using a computer with aux4/computer
 ```

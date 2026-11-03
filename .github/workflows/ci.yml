@@ -26,11 +26,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # aux4/computer (a dependency) only reaches the prod hub when it is promoted, so off main
+      # install it from the dev hub first; the test step below then finds it already installed
+      # (aux4 and pkger too) and installs everything else from the prod hub as usual.
+      - name: Install aux4/computer from the dev hub
+        if: github.ref_name != 'main'
+        shell: bash
+        run: |
+          curl -fsSL https://aux4.sh | sh
+          echo "$HOME/.aux4.config/packages/aux4/aux4" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aux4.config/packages/aux4/aux4:$PATH"
+          curl -fsSL https://pkger.aux4.sh | sh
+          AUX4_REGISTRY_URL=https://dev.api.hub.aux4.io/v1/packages aux4 aux4 pkger install aux4/computer
+          aux4 aux4 pkger list
+
       - name: Test
         uses: aux4/action@v1
         with:
           command: test
           build_command: aux4 builder darwin
+
+      # The aux4/computer provider contract suite (headless: dry runs + a temporary state dir).
+      # The test step installed aux4, aux4/test, this package and aux4/computer.
+      - name: Conformance
+        shell: bash
+        run: aux4 computer conformance --provider mac
 
   # The same live UI test the publish gate runs, so a branch shows it before reaching dev.
   test-live:

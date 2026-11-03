@@ -8,8 +8,12 @@ every action is recorded in an action log that a stop switch can halt at once.
 
 It is built to **work alongside the person using the Mac**: actions run in the background by default —
 on an app that isn't in front, without moving the mouse cursor or changing the frontmost app — and fall
-back to real input only when the background isn't possible. The package includes an AI skill for using it
-this way.
+back to real input only when the background isn't possible.
+
+It is the **macOS provider of [aux4/computer](https://hub.aux4.io/r/public/packages/aux4/computer)** (provider
+contract 1): on a Mac, the generic `aux4 computer <command>` runs the same command here, and
+`aux4 computer mac <command>` keeps working directly. The two share one stop switch and action log, and the
+`aux4/computer` AI skill (`aux4 ai skill computer prompt`) includes this package's macOS notes.
 
 This package is **darwin-only** (macOS). It ships native binaries for `darwin/arm64` and `darwin/amd64`.
 
@@ -18,6 +22,29 @@ This package is **darwin-only** (macOS). It ships native binaries for `darwin/ar
 ```bash
 aux4 aux4 pkger install aux4/computer-mac
 ```
+
+This also installs its dependency `aux4/computer`.
+
+## Provider info and notes
+
+```bash
+aux4 computer mac info
+aux4 computer mac notes
+```
+
+`info` describes this provider for `aux4/computer` as JSON: `provider` (`mac`), `contract` (`1`), `platform`
+(`darwin/arm64` or `darwin/amd64`), `version`, boolean `capabilities` (`background`, `ocr`, `annotate`, `menu`,
+`dialog`, `window`, `clipboard`, ...), `permissions` (same shape as `permissions`) and where the shared stop switch and
+log live (`stateDir`, `stopFile`, `logFile`). `aux4 computer providers` uses it to list this package as a contract 1
+provider.
+
+```json
+{"contract":1,"package":"aux4/computer-mac","platform":"darwin/arm64","provider":"mac","version":"0.7.0","capabilities":{"background":true,"ocr":true,"annotate":true,"...":true},"permissions":{"accessibility":{"granted":true,"guidance":"Accessibility access is granted."},"screenRecording":{"granted":true,"guidance":"Screen Recording access is granted."}},"stateDir":"/Users/sally/Library/Application Support/aux4-computer"}
+```
+
+`notes` prints the macOS specifics for agents as markdown: the permissions macOS asks for, what works in the
+background (editing menu items such as Copy, Paste and Select All are disabled while an app is in the background), the
+silent data-loss warning, the slow first OCR run, Retina coordinates and how labels differ between macOS versions.
 
 ## Permissions
 
@@ -358,17 +385,22 @@ aux4 computer mac resume
 Every command that sends input or changes state (`click`, `type`, `shortcut`, `scroll`, `drag`, `move`,
 `set`, `select`, `menu --path`, `dialog --press`, `clipboard copy`/`paste`, `open`, `focus`, `window`
 (except `list`), `quit`, `hide`, `unhide`) appends one
-JSON line to `~/Library/Logs/aux4-computer-mac/actions.jsonl` — time, command, app, arguments, mode and
-result or error — including attempts that failed or were refused. Typed text is cut to a short prefix plus
-its length. The file is rotated at 10MB. `log` prints the most recent entries.
+JSON line to `~/Library/Application Support/aux4-computer/actions.jsonl` (readable only by the user) — time,
+`provider` (`mac`), command, app, arguments, mode and result or error — including attempts that failed or were
+refused. Typed text is cut to a short prefix plus its length. The file is rotated at 10MB. `log` prints the most
+recent entries (also those older releases wrote to `~/Library/Logs/aux4-computer-mac`).
 
-`stop` turns on the stop switch (a `STOP` file in `~/Library/Application Support/aux4-computer-mac`): every
+`stop` turns on the stop switch (a `STOP` file in `~/Library/Application Support/aux4-computer`): every
 input or state command then refuses with a clear JSON error until `resume`, while read-only commands
 (`state`, `read`, `find`, `screenshot`, `ocr`, `wait`, listing menus or dialogs) keep working. Setting
-`AUX4_COMPUTER_MAC_STOP=1` in an agent's environment stops it the same way.
+`AUX4_COMPUTER_STOP=1` in an agent's environment stops it the same way.
+
+The stop switch and the log are **shared with `aux4/computer`** and its other providers: `aux4 computer stop` stops
+`aux4 computer mac ...` called directly too, and `aux4 computer log` shows this package's entries. For one release the
+old stop file (`~/Library/Application Support/aux4-computer-mac/STOP`) and `AUX4_COMPUTER_MAC_STOP=1` still stop input.
 
 ```json
-{"command":"click","error":"Stopped: aux4 computer mac is not sending input or changing state (/Users/sally/Library/Application Support/aux4-computer-mac/STOP exists). Run 'aux4 computer mac resume' to allow it again.","stopped":true}
+{"command":"click","error":"Stopped: aux4 computer mac is not sending input or changing state (/Users/sally/Library/Application Support/aux4-computer/STOP exists). Run 'aux4 computer resume' (or 'aux4 computer mac resume') to allow it again.","stopped":true}
 ```
 
 ### Example: work in TextEdit without interrupting the user
@@ -402,10 +434,12 @@ aux4 computer mac clipboard paste --text "replaced via agent"
 ## AI skill
 
 ```bash
-aux4 ai skill computer-mac prompt
+aux4 ai skill computer prompt
 ```
 
-The methodology tells agents to start from `state`, find elements with `find` (and `ocr` when the text isn't in the
+The skill comes from `aux4/computer`: the generic method followed by this package's macOS notes
+(`aux4 computer mac notes`). `aux4 ai skill computer-mac prompt` still prints the same skill, as a deprecated alias
+kept for one release. The methodology tells agents to start from `state`, find elements with `find` (and `ocr` when the text isn't in the
 accessibility tree), look with `screenshot --annotate` when they need to see the layout, act by element ref, menu
 path, `set` and `select` rather than coordinates and keystrokes, and `wait` for the result instead of sleeping; what
 works in the background and when the foreground fallback happens; the coordinate rules; the stop switch and action
@@ -432,3 +466,15 @@ If **every** call takes ~30s or longer, macOS's Neural Engine compiler is stuck 
 whether `ANECompilerService` sits at ~100% CPU (Activity Monitor or `ps -axo pcpu,comm | grep ANECompiler`),
 stop any leftover `aux4-computer-mac` processes, and run `sudo killall ANECompilerService` (or restart
 the Mac). Recognition is back to ~0.1–0.3s afterwards.
+
+## Environment variables
+
+| Variable | Effect |
+|----------|--------|
+| `AUX4_COMPUTER_STOP=1` | Stop switch for the processes that see it (alias: `AUX4_COMPUTER_MAC_STOP=1`) |
+| `AUX4_COMPUTER_STATE_DIR` | Directory for the shared `STOP` file and `actions.jsonl` instead of `~/Library/Application Support/aux4-computer` (the old paths are then ignored) |
+| `AUX4_COMPUTER_DRY_RUN=1` | Decide background or foreground and print the result without sending anything (alias: `AUX4_COMPUTER_MAC_DRY_RUN`) |
+| `AUX4_COMPUTER_SIMULATE_BACKGROUND=unavailable` | Make every background attempt fail, to see the foreground fallback (alias: `AUX4_COMPUTER_MAC_SIMULATE_BACKGROUND`) |
+| `AUX4_COMPUTER_DENY_PERMISSIONS=1` | Report Accessibility and Screen Recording as not granted (alias: `AUX4_COMPUTER_MAC_DENY_PERMISSIONS`) |
+
+The same names work for every `aux4/computer` provider.
