@@ -89,7 +89,7 @@ for i in $(seq 1 15); do
   [ "$SHOWN" = "true" ] && break
   sleep 0.2
 done
-echo "$SHOWN"
+if [ "$SHOWN" = "true" ]; then echo true; else aux4 computer mac find "" --app Calculator | jq -c '[.matches[] | select(.role != "AXButton") | {role, label, value}]'; fi
 ```
 
 ```expect
