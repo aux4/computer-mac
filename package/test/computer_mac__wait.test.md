@@ -196,12 +196,15 @@ AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that
 
 ### with --gone in auto should return at once when accessibility has no match, even if recognition is slow
 
+Recognition is slowed to 5s here; returning well under that (the accessibility scan alone can take
+over a second on a slow CI runner) shows it didn't wait for recognition.
+
 ```timeout
 8000
 ```
 
 ```execute
-AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 1)}'
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 2.5)}'
 ```
 
 ```expect
