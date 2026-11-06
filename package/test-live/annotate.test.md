@@ -81,19 +81,13 @@ aux4 computer mac click --element "$(echo "$MARK" | jq -r .ref)" --app Calculato
 ```
 
 ```execute
-# The display can take a moment to update, and its element role differs between macOS versions:
-# poll for any non-button element whose value is 7.
+# The display can take a moment to update on slower runners: poll instead of a fixed sleep.
 SHOWN=false
 for i in $(seq 1 15); do
-  SHOWN=$(aux4 computer mac find "" --app Calculator | jq -c '[.matches[] | select(.role != "AXButton" and ((.value // "") | tostring | gsub("[^0-9]"; "")) == "7")] | length > 0')
+  SHOWN=$(aux4 computer mac find "" --role AXStaticText --app Calculator | jq -c '[.matches[] | select(((.value // "") | tostring | gsub("[^0-9]"; "")) == "7" or .label == "7")] | length > 0')
   [ "$SHOWN" = "true" ] && break
   sleep 0.2
 done
-# Some macOS versions don't expose Calculator's display to accessibility at all: read it through
-# Calculator's own Copy instead.
-if [ "$SHOWN" != "true" ]; then
-  SHOWN=$(aux4 computer mac clipboard copy --app Calculator | jq -c '((.text // "") | gsub("[^0-9]"; "")) == "7"')
-fi
 echo "$SHOWN"
 ```
 
