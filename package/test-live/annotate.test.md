@@ -77,8 +77,15 @@ aux4 computer mac click --element "$(echo "$MARK" | jq -r .ref)" --app Calculato
 ### should show 7 on the display after the click
 
 ```execute
-sleep 0.3
-aux4 computer mac find "" --role AXStaticText --app Calculator | jq -c '[.matches[] | select(.value == "7" or .label == "7")] | length > 0'
+# The display can take a moment to update, and its element role differs between macOS versions:
+# poll for any non-button element whose value is 7.
+SHOWN=false
+for i in $(seq 1 15); do
+  SHOWN=$(aux4 computer mac find "" --app Calculator | jq -c '[.matches[] | select(.role != "AXButton" and ((.value // "") | tostring | gsub("[^0-9]"; "")) == "7")] | length > 0')
+  [ "$SHOWN" = "true" ] && break
+  sleep 0.2
+done
+echo "$SHOWN"
 ```
 
 ```expect
