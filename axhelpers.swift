@@ -112,6 +112,64 @@ func axSelectAll(_ element: AXUIElement) -> BackgroundOutcome {
     return axSetSelection(element, start: 0, length: n)
 }
 
+// MARK: - label fallback (unlabelled controls)
+
+// axLabel resolves a human-readable label for an element. Most controls expose AXTitle or
+// AXDescription, but some (NSSavePanel's name field, its "File Format" pop-up) report neither --
+// an agent reading 'dialog'/'state'/'find'/'read' then sees label "" and can't tell fields apart.
+// Fall back, in order: AXTitleUIElement (the AX-standard pointer from a control to the static
+// text that labels it, when the app sets it), then the nearest static text to the element's left
+// on the same row, then the nearest one directly above -- both scoped to the element's own
+// container (its parent, or grandparent if the parent has no static text of its own, since some
+// apps put the label and the control in separate sub-groups).
+func axLabel(_ element: AXUIElement) -> String {
+    if let t = axString(element, kAXTitleAttribute), !t.isEmpty { return t }
+    if let d = axString(element, kAXDescriptionAttribute), !d.isEmpty { return d }
+    if let l = axString(element, "AXLabel"), !l.isEmpty { return l }
+    if let titleEl = axElementAttr(element, "AXTitleUIElement") {
+        let t = axString(titleEl, kAXValueAttribute) ?? axString(titleEl, kAXTitleAttribute) ?? ""
+        if !t.isEmpty { return t }
+    }
+    return nearbyStaticTextLabel(element)
+}
+
+func axRangesOverlap(_ aMin: CGFloat, _ aMax: CGFloat, _ bMin: CGFloat, _ bMax: CGFloat) -> Bool {
+    return aMin < bMax && bMin < aMax
+}
+
+func nearbyStaticTextLabel(_ element: AXUIElement) -> String {
+    guard let frame = axFrame(element) else { return "" }
+    func candidates(in container: AXUIElement) -> [(CGRect, String)] {
+        return descendants(container, maxDepth: 3) { el, role in role == "AXStaticText" }
+            .compactMap { el -> (CGRect, String)? in
+                guard let f = axFrame(el) else { return nil }
+                let text = (axString(el, kAXValueAttribute) ?? axString(el, kAXTitleAttribute) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return text.isEmpty ? nil : (f, text)
+            }
+    }
+    var pool: [(CGRect, String)] = []
+    if let parent = axParent(element) {
+        pool = candidates(in: parent)
+        if pool.isEmpty, let grandparent = axParent(parent) {
+            pool = candidates(in: grandparent)
+        }
+    }
+    guard !pool.isEmpty else { return "" }
+    let midY = frame.origin.y + frame.height / 2
+    // Same row: the candidate's vertical midpoint falls within the element's vertical span.
+    let sameRow = pool.filter { $0.0.origin.y <= midY && $0.0.origin.y + $0.0.height >= midY }
+    let left = sameRow.filter { $0.0.origin.x + $0.0.width <= frame.origin.x + 2 }
+    if let nearest = left.max(by: { $0.0.origin.x < $1.0.origin.x }) { return nearest.1 }
+    // Directly above: horizontally overlapping, ends at or before the element's top.
+    let above = pool.filter {
+        $0.0.origin.y + $0.0.height <= frame.origin.y + 2
+            && axRangesOverlap($0.0.minX, $0.0.maxX, frame.minX, frame.maxX)
+    }
+    if let nearest = above.max(by: { $0.0.origin.y < $1.0.origin.y }) { return nearest.1 }
+    return ""
+}
+
 // MARK: - silent data-loss warning (Accessibility text edit in a document window)
 
 // documentWindow walks up from element to the ancestor AXWindow, returning it only when it

@@ -8,7 +8,9 @@ Each element has:
 - `ref` — a path (e.g. `0.2.1`) identifying its position in the tree, valid against the current state of
   that app. Pass it to `computer mac click --element`.
 - `role` — the AX role (e.g. `AXButton`, `AXTextField`).
-- `label` — title/description, when available.
+- `label` — title/description, when available. If an element has neither, falls back to its
+  `AXTitleUIElement` pointer, then the nearest static text to its left on the same row, then the nearest
+  one directly above (e.g. NSSavePanel's unlabelled name field reports `label: "Save As:"`).
 - `value` — the AX value as a string, when available (e.g. text field contents).
 - `frame` — `{x, y, width, height}` in screen points.
 - `enabled` / `focused` — booleans.

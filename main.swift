@@ -575,10 +575,7 @@ struct AXNode {
 
 func describeElement(_ element: AXUIElement, ref: String) -> AXNode {
     let role = axString(element, kAXRoleAttribute) ?? ""
-    let label = axString(element, kAXTitleAttribute)
-        ?? axString(element, kAXDescriptionAttribute)
-        ?? axString(element, "AXLabel")
-        ?? ""
+    let label = axLabel(element)
     let value = axString(element, kAXValueAttribute) ?? ""
     let frame = axFrame(element)
     let enabled = axBool(element, kAXEnabledAttribute) ?? true

@@ -259,6 +259,13 @@ tree by text and/or role and includes a `center` point (screen points) for each 
 `windowCenter` (relative to the app's window) with `--app`. A `ref` is only valid against the
 current state of that app — read/find again if the UI has changed.
 
+**Note:** when an element exposes no `AXTitle`/`AXDescription` (e.g. NSSavePanel's file name field and
+its "File Format" pop-up both report an empty label), `label` falls back to the element's
+`AXTitleUIElement` pointer, then to the nearest static text to its left on the same row, then to the
+nearest one directly above. This applies to `read`, `find`, `state` and `dialog` alike, so an agent can
+tell an unlabelled name field (`label: "Save As:"`) apart from an unlabelled format pop-up
+(`label: "File Format:"`) instead of seeing `label: ""` for both.
+
 ### Acting on the UI
 
 ```bash

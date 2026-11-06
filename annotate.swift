@@ -56,7 +56,7 @@ func collectMarks(windows: [(AXUIElement, String)], region: CGRect, roles: Set<S
             if roles.contains(role) {
                 let vis = f.intersection(clip)
                 if !vis.isNull && vis.width >= 4 && vis.height >= 4 {
-                    var label = axString(el, kAXTitleAttribute) ?? axString(el, kAXDescriptionAttribute) ?? axString(el, "AXLabel") ?? ""
+                    var label = axLabel(el)
                     var value = axString(el, kAXValueAttribute) ?? ""
                     if label.isEmpty, textRoles.contains(role) { label = axString(el, kAXPlaceholderValueAttribute) ?? "" }
                     if label.isEmpty, role == "AXButton" { label = axSubrole(el) }
