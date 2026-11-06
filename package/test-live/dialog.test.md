@@ -70,6 +70,63 @@ aux4 computer mac dialog --app TextEdit | jq -c '.dialog'
 null
 ```
 
+## save panel field labels
+
+NSSavePanel reports its name field and "File Format" pop-up with an empty AXTitle/AXDescription --
+the label an agent needs comes from the nearby "Save As:" / "File Format:" static text instead
+(see axLabel's fallback in axhelpers.swift). Covers 'dialog' here; 'state' and 'find' share the
+same describeElement/axLabel path so they get the same fallback.
+
+### should open the real Save panel and label the name field and format pop-up
+
+```timeout
+20000
+```
+
+```execute
+aux4 computer mac menu --app TextEdit --path "File > New" > /dev/null
+for i in $(seq 1 25); do
+  [ "$(aux4 computer mac window list TextEdit | jq '[.windows[] | select(.subrole == null)] | length')" -gt 0 ] && break
+  sleep 0.2
+done
+aux4 computer mac type "Save panel label test" --app TextEdit --mode foreground > /dev/null
+aux4 computer mac wait --app TextEdit --text "Save panel label test" --source ax --timeout 10s > /dev/null
+aux4 computer mac shortcut cmd+s --app TextEdit > /dev/null
+for i in $(seq 1 25); do
+  aux4 computer mac dialog --app TextEdit > /tmp/computer-mac-save-panel.json
+  jq -e '.dialog != null' /tmp/computer-mac-save-panel.json > /dev/null && break
+  sleep 0.2
+done
+jq -c '{nameFieldLabel: ([.dialog.fields[] | select(.role == "AXTextField") | .label][0] // ""), formatLabel: ([.dialog.fields[] | select(.role == "AXPopUpButton" and ((.value // "") | test("Text Document|Rich Text"))) | .label][0] // "")}' /tmp/computer-mac-save-panel.json
+```
+
+```expect:partial
+{"nameFieldLabel":"Save As*?","formatLabel":"File Format*?"}
+```
+
+### should cancel the save panel and discard the untitled document
+
+```timeout
+15000
+```
+
+```execute
+aux4 computer mac dialog --app TextEdit --press Cancel --mode background | jq -c '{closed, pressed}'
+aux4 computer mac menu --app TextEdit --path "File > Close" > /dev/null
+for i in $(seq 1 25); do
+  aux4 computer mac dialog --app TextEdit > /tmp/computer-mac-save-panel-close.json
+  jq -e '.dialog != null' /tmp/computer-mac-save-panel-close.json > /dev/null && break
+  sleep 0.2
+done
+BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' /tmp/computer-mac-save-panel-close.json)
+aux4 computer mac dialog --app TextEdit --press "$BUTTON" --mode background | jq -c --arg b "$BUTTON" '{closed: true, pressed: (.pressed == $b)}'
+```
+
+```expect:partial
+{"closed":true,"pressed":"Cancel"}
+{"closed":true,"pressed":true}
+```
+
 ## open --file by bundle id
 
 ### should open a file and wait for its window

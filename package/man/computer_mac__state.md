@@ -14,7 +14,9 @@ One call that tells an agent where things stand, without changing anything:
   actionable and text elements (buttons, checkboxes, pop-ups, fields, text, links, sliders…), each with
   `ref`, `role`, `label`, `value` (both cut at 80 characters), `frame` (whole points), `subrole` for
   untitled window buttons (`AXCloseButton`…), `enabled:false` / `focused:true` when so. `root` is the
-  ref of the window or dialog the tree starts at.
+  ref of the window or dialog the tree starts at. `label` falls back the same way `dialog`/`find`/`read`
+  do when an element has no `AXTitle`/`AXDescription`: its `AXTitleUIElement`, then the nearest static
+  text to its left on the same row, then the nearest one directly above.
 
 `--depth` counts levels of those elements (layout groups in between don't count; default `3`, `0` = no
 tree). `--limit` caps the number of elements (default `120`); when there are more — or the app is so large
