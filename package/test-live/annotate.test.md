@@ -89,7 +89,12 @@ for i in $(seq 1 15); do
   [ "$SHOWN" = "true" ] && break
   sleep 0.2
 done
-if [ "$SHOWN" = "true" ]; then echo true; else aux4 computer mac find "" --app Calculator | jq -c '[.matches[] | select(.role != "AXButton") | {role, label, value}]'; fi
+# Some macOS versions don't expose Calculator's display to accessibility at all: read it through
+# Calculator's own Copy instead.
+if [ "$SHOWN" != "true" ]; then
+  SHOWN=$(aux4 computer mac clipboard copy --app Calculator | jq -c '((.text // "") | gsub("[^0-9]"; "")) == "7"')
+fi
+echo "$SHOWN"
 ```
 
 ```expect

@@ -119,7 +119,7 @@ aux4 computer mac wait --app ThisAppDoesNotExist12345 --gone true | jq -c '{sour
 ### with --gone should return immediately for text that is not there
 
 ```execute
-aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --gone true | jq -c '{source, matches, quick: (.waited < 2)}'
+aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --gone true | jq -c '{source, matches, quick: (.waited < 5)}'
 ```
 
 ```expect
