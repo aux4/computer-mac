@@ -70,6 +70,10 @@ aux4 computer mac window restore --app TextEdit --title "computer-mac-open-test"
 
 ### should enter and exit fullscreen when the runner allows it
 
+```timeout
+30000
+```
+
 ```execute
 if aux4 computer mac window fullscreen true --app TextEdit --title "computer-mac-open-test" > /tmp/computer-mac-fullscreen.json 2> /tmp/computer-mac-fullscreen.err; then
   jq -c '.after.fullscreen' /tmp/computer-mac-fullscreen.json

@@ -76,6 +76,10 @@ aux4 computer mac click --element "$(echo "$MARK" | jq -r .ref)" --app Calculato
 
 ### should show 7 on the display after the click
 
+```timeout
+30000
+```
+
 ```execute
 # The display can take a moment to update, and its element role differs between macOS versions:
 # poll for any non-button element whose value is 7.
