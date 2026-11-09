@@ -13,6 +13,15 @@ the current focus.
 
 The output's `mode` says which happened, and `method` how (`accessibility` or `postToPid`).
 
+**Nothing focused, nothing typed:** if the app has **no focused element at all** (e.g. a fresh app with
+only an Open panel and no document window, or a window where nothing is selected), `auto` and `background`
+refuse and return an error — e.g. `Nothing has keyboard focus in TextEdit: it only has a panel: 'Open', no
+document window. Open or create a document first (e.g. File > New), or click the field in the open panel.`
+There is no field for the text to land in, so sending real keystrokes anyway would silently type into
+nothing while still reporting a success-looking response. `--mode foreground` still types real keystrokes
+as explicitly requested in this case, but the output carries a `"warning"` saying nothing is focused and
+the keystrokes may not land anywhere — read it before assuming the text was entered.
+
 Use `--delay` to wait before typing — useful right after opening a panel (e.g. Spotlight) that needs a
 moment to receive focus.
 

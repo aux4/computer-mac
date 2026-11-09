@@ -24,6 +24,22 @@ frontmost, multi-clicks, drag, and the few controls that ignore Accessibility pr
 - `menu --path` presses other menu items (View, Format, File > New...) in the background.
 - `focus` and `window raise` always activate the app (foreground).
 
+### Disabled menu items and no keyboard focus aren't always "background"
+
+A disabled menu item's error, and `type`'s error when nothing is focused, name the real cause instead of
+always blaming the background:
+
+- If the app has **no window open at all**, or only a panel/sheet/system dialog (an Open or Save panel with
+  no document yet, an alert), that's why a window-scoped item is disabled or nothing is focused -- not
+  backgrounding. The remedy is to open or create a document (e.g. `menu --path "File > New"`) or finish/close
+  the panel, not `--mode foreground`.
+- Only when the app genuinely has a document/standard window and isn't frontmost does the error say
+  "disabled while in the background" and suggest retrying with `--mode foreground`.
+- `type --mode auto` (the default) with nothing focused **errors** instead of sending blind keystrokes that
+  would land nowhere while still looking like a success. `--mode foreground` still types real keystrokes as
+  explicitly requested, but adds a `"warning"` when nothing is focused -- check it before assuming the text
+  landed.
+
 ### Silent data loss (documentEdited)
 
 Text written through Accessibility (`set --value`, and `type` / `clipboard paste` in the background) does **not** mark
