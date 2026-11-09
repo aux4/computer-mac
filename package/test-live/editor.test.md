@@ -184,6 +184,10 @@ no document window) is left. A `type` with nothing focused must error instead of
 keystrokes into nothing, and a disabled File menu item must say it's the missing document window,
 not "in the background" (TextEdit is still frontmost here).
 
+```timeout
+15000
+```
+
 ```beforeAll
 osascript -e 'tell application "TextEdit" to close every document saving no' > /dev/null 2>&1 || true
 sleep 1
