@@ -19,3 +19,10 @@
   `AUX4_COMPUTER_SIMULATE_BACKGROUND` and `AUX4_COMPUTER_DENY_PERMISSIONS` are accepted, with the
   `AUX4_COMPUTER_MAC_*` names kept as aliases.
 - CI runs the `aux4/computer` conformance suite (`aux4 computer conformance --provider mac`).
+- `menu`'s disabled-item error and `type`'s no-focus error now name the real cause instead of defaulting to
+  "the app is in the background": no window open at all, or only a panel/sheet/system dialog with no document
+  window, gets its own message (e.g. "has no document window open (only a panel: 'Open')") telling the caller
+  to open or create a document, since backgrounding isn't the issue and `--mode foreground` wouldn't fix it.
+  Background is only blamed when the app genuinely has a document/standard window and isn't frontmost.
+  `type --mode auto` with nothing focused now **errors** instead of sending real keystrokes into nothing while
+  reporting a success-looking response; `--mode foreground` still types as asked but adds a `"warning"`.

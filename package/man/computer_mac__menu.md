@@ -22,6 +22,14 @@ items (View modes, New, Quit, Settings…) work in the background. `--mode backg
 falling back. Pressing an item is recorded in the action log and refused while the stop switch is on;
 listing is read-only. Requires Accessibility.
 
+**The error names the real cause, not just "background":** a disabled item that acts on a window only blames
+the background when the app actually has a document/standard window and isn't frontmost (and then says to
+retry with `--mode foreground` if that's the fix). If the app has **no window at all**, or only a panel/sheet/
+system dialog (e.g. an Open or Save panel with no document open yet), the error says so instead — e.g. `menu
+item 'File > Save As…' is disabled: TextEdit has no document window open (only a panel: 'Open'). Open or
+create one first (e.g. File > New) or finish/close the panel.` Backgrounding has nothing to do with that case,
+and bringing the app forward (`--mode foreground`) will not enable the item.
+
 #### Usage
 
 ```bash

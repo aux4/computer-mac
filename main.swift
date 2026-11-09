@@ -1301,6 +1301,30 @@ func axSelectedLength(_ element: AXUIElement) -> Int? {
     return range.length
 }
 
+// noKeyboardFocusMessage explains, for an error, that nothing in the app has keyboard focus --
+// says what's actually on screen (no window at all, vs. only panels/sheets/dialogs with no
+// document) so the caller knows the real remedy: click a field, or open/create a document.
+func noKeyboardFocusMessage(_ target: Target) -> String {
+    let windows = axWindows(target.axApp)
+    if windows.isEmpty {
+        return "Nothing has keyboard focus in \(target.name): it has no window open. Open or create one first (e.g. File > New), then click the field you want to type into."
+    }
+    if !windows.contains(where: isDocumentOrStandardWindow) {
+        let panels = windowDescriptions(windows)
+        let only = panels.count == 1 ? panels[0] : "panels: " + panels.joined(separator: ", ")
+        return "Nothing has keyboard focus in \(target.name): it only has \(only), no document window. Open or create a document first (e.g. File > New), or click the field in the open panel."
+    }
+    return "Nothing has keyboard focus in \(target.name). Click the field you want to type into first, or open a document."
+}
+
+// noKeyboardFocusWarning is the same fact as noKeyboardFocusMessage, worded for a "warning"
+// field on a successful-looking response rather than an error -- used when --mode foreground
+// was explicitly requested, so the real keystrokes are sent as asked, but the caller still
+// needs to know they may not land anywhere.
+func noKeyboardFocusWarning(_ target: Target) -> String {
+    return "nothing has keyboard focus in \(target.name); these keystrokes may not land anywhere -- click a field or open a document first"
+}
+
 // axInsertText inserts text at the focused element's cursor (replacing the selection), like
 // typing, by setting AXSelectedText. Returns nil on success or a reason it isn't possible.
 func axInsertText(_ target: Target, _ text: String) -> String? {
@@ -1347,6 +1371,19 @@ func cmdType(_ args: [String]) {
     if delayMs > 0 {
         usleep(UInt32(delayMs) * 1000)
     }
+    let noFocus = focusedElement(target) == nil
+    if noFocus {
+        if mode != .foreground {
+            // auto/background: there is nothing on screen to receive the text. Falling back to
+            // blind keystrokes here used to report a success-looking "mode: foreground" with no
+            // visible effect -- error out instead so the caller knows to focus a field or open a
+            // document, rather than believing the text was entered.
+            fail(noKeyboardFocusMessage(target))
+        }
+        // Explicit foreground: honor the real-keystrokes request as asked, but flag that
+        // nothing is focused so the caller knows the text may not have landed anywhere.
+        base["warning"] = noKeyboardFocusWarning(target)
+    }
     let plan: BackgroundPlan = .attempt({
         guard let reason = axInsertText(target, text) else {
             var info: [String: Any] = ["method": "accessibility"]
@@ -1357,8 +1394,9 @@ func cmdType(_ args: [String]) {
             return .done(info)
         }
         // Keystrokes posted to an app only land when it is frontmost (a background app has no
-        // key window); either way nothing on screen moves.
-        if isFrontmost(target.pid) {
+        // key window) and only when something is actually focused to receive them -- otherwise
+        // this "success" path is the same blind-keystroke problem as the auto/background case.
+        if !noFocus, isFrontmost(target.pid) {
             postUnicode(text, pid: target.pid)
             return .done(["method": "postToPid"])
         }

@@ -170,6 +170,33 @@ func nearbyStaticTextLabel(_ element: AXUIElement) -> String {
     return ""
 }
 
+// MARK: - window kind diagnostics (disabled menu items / no keyboard focus)
+
+// isDocumentOrStandardWindow reports whether a window is a real document/content window, as
+// opposed to a chromeless panel (an NSOpenPanel/NSSavePanel, a sheet, a system dialog). AXDialog
+// / AXSystemDialog subroles catch alerts and sheets, but an Open/Save panel reports the SAME
+// subrole as a normal window ("AXStandardWindow") -- confirmed live: TextEdit's "Open" panel at
+// launch has role AXWindow, subrole AXStandardWindow, no AXDocument, yet AXCloseButton /
+// AXMinimizeButton / AXZoomButton are all unsupported attributes on it, while an actual document
+// window exposes all three. So: AXDocument present, or it exposes AXCloseButton, means a real
+// window; a bare AXDialog/AXSystemDialog subrole, or neither of those, means a panel.
+func isDocumentOrStandardWindow(_ w: AXUIElement) -> Bool {
+    if axString(w, kAXDocumentAttribute) != nil { return true }
+    let sub = axSubrole(w)
+    if sub == "AXDialog" || sub == "AXSystemDialog" { return false }
+    return axElementAttr(w, kAXCloseButtonAttribute) != nil
+}
+
+// windowDescriptions renders an app's windows as short human-readable fragments ("a panel:
+// 'Open'", "an untitled panel") for diagnostic error messages that need to say what's actually
+// on screen instead of guessing.
+func windowDescriptions(_ windows: [AXUIElement]) -> [String] {
+    return windows.map { w in
+        let title = axString(w, kAXTitleAttribute) ?? ""
+        return title.isEmpty ? "an untitled panel" : "a panel: '\(title)'"
+    }
+}
+
 // MARK: - silent data-loss warning (Accessibility text edit in a document window)
 
 // documentWindow walks up from element to the ancestor AXWindow, returning it only when it

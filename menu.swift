@@ -75,6 +75,30 @@ func menuBarOf(_ target: Target) -> (AXUIElement, String?) {
     return (bar, axRefOf(bar, in: target.axApp))
 }
 
+// menuDisabledReason explains why a menu item is AXEnabled == false. "In the background" is
+// only the real cause for an item that acts on an actual document/standard window while the
+// app isn't frontmost -- an app with no window at all, or only panels/sheets/dialogs (an open
+// panel, a save sheet, Calculator), disables window-scoped items for a different reason that
+// backgrounding has nothing to do with, and blaming the background sends an agent into a loop
+// of "bring to front" retries that can never fix it.
+func menuDisabledReason(_ target: Target, _ titles: [String]) -> String {
+    let path = titles.joined(separator: " > ")
+    let windows = axWindows(target.axApp)
+    if windows.isEmpty {
+        return "menu item '\(path)' is disabled: \(target.name) has no window open. Open or create one first (e.g. File > New)."
+    }
+    let real = windows.filter(isDocumentOrStandardWindow)
+    if real.isEmpty {
+        let panels = windowDescriptions(windows)
+        let only = panels.count == 1 ? panels[0] : "panels: " + panels.map { $0.replacingOccurrences(of: "a panel: ", with: "").replacingOccurrences(of: "an untitled panel", with: "an untitled one") }.joined(separator: ", ")
+        return "menu item '\(path)' is disabled: \(target.name) has no document window open (only \(only)). Open or create one first (e.g. File > New) or finish/close the panel."
+    }
+    if !isFrontmost(target.pid) {
+        return "menu item '\(path)' is disabled while \(target.name) is in the background; retry with --mode foreground if bringing the app forward is what enables it."
+    }
+    return "menu item '\(path)' is disabled in \(target.name)'s current state."
+}
+
 func cmdMenu(_ args: [String]) {
     let appArg = argAt(args, 0)
     let pathArg = argAt(args, 1)
@@ -114,7 +138,7 @@ func cmdMenu(_ args: [String]) {
             fail("'\(titles.joined(separator: " > "))' is a submenu: add one of its items: \(options.joined(separator: ", "))")
         }
         if axBool(item, kAXEnabledAttribute) == false {
-            return .unavailable("menu item '\(titles.joined(separator: " > "))' is disabled (while \(target.name) is in the background, items that act on its window stay disabled)")
+            return .unavailable(menuDisabledReason(target, titles))
         }
         let before = menuMark(item)
         let result = AXUIElementPerformAction(item, kAXPressAction as CFString)

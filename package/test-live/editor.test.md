@@ -176,3 +176,35 @@ aux4 computer mac state --app com.apple.TextEdit | jq -c '{bundleId: (.app.bundl
 ```expect
 {"bundleId":true,"hasTextArea":true}
 ```
+
+## no document window (diagnose the real cause, never blame-the-background or blind keystrokes)
+
+Closes every open document so only TextEdit's app chrome (no window, or an Open/Save panel with
+no document window) is left. A `type` with nothing focused must error instead of sending real
+keystrokes into nothing, and a disabled File menu item must say it's the missing document window,
+not "in the background" (TextEdit is still frontmost here).
+
+```beforeAll
+osascript -e 'tell application "TextEdit" to close every document saving no' > /dev/null 2>&1 || true
+sleep 1
+```
+
+### should refuse to type with nothing focused instead of sending blind keystrokes
+
+```execute
+aux4 computer mac type "hello" --app TextEdit --mode auto
+```
+
+```error:partial
+Nothing has keyboard focus in TextEdit*?
+```
+
+### should explain File > Save As is disabled because there is no document, not the background
+
+```execute
+aux4 computer mac menu --app TextEdit --path "File > Save As…"
+```
+
+```error:partial
+Could not press the menu item: menu item 'File > Save As…' is disabled: TextEdit has no*
+```
