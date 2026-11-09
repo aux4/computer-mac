@@ -185,12 +185,32 @@ keystrokes into nothing, and a disabled File menu item must say it's the missing
 not "in the background" (TextEdit is still frontmost here).
 
 ```timeout
-15000
+20000
 ```
 
 ```beforeAll
-osascript -e 'tell application "TextEdit" to close every document saving no' > /dev/null 2>&1 || true
-sleep 1
+# Close every open document through the app's own Accessibility tooling (no AppleScript/
+# Automation permission needed, unlike osascript): press the close button, and if that opens
+# a "keep this document?" sheet, press Delete/Don't Save, up to a few times.
+for i in 1 2 3 4 5; do
+  N=$(aux4 computer mac state --app TextEdit 2>/dev/null | jq -r '.windows | length // 0')
+  [ "$N" = "0" ] && break
+  CLOSE=$(aux4 computer mac state --app TextEdit 2>/dev/null | jq -r '[.windows[] | select(.ref != null)][0].ref // empty')
+  if [ -n "$CLOSE" ]; then
+    aux4 computer mac window close --app TextEdit > /dev/null 2>&1 || true
+  fi
+  for j in 1 2 3 4 5 6 7 8 9 10; do
+    aux4 computer mac dialog --app TextEdit > /tmp/computer-mac-notype-dialog.json 2>/dev/null || echo '{}' > /tmp/computer-mac-notype-dialog.json
+    jq -e '.dialog != null' /tmp/computer-mac-notype-dialog.json > /dev/null 2>&1 && break
+    sleep 0.2
+  done
+  BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' /tmp/computer-mac-notype-dialog.json 2>/dev/null)
+  if [ -n "$BUTTON" ]; then
+    aux4 computer mac dialog --app TextEdit --press "$BUTTON" --mode background > /dev/null 2>&1 || true
+  fi
+  sleep 0.3
+done
+rm -f /tmp/computer-mac-notype-dialog.json
 ```
 
 ### should refuse to type with nothing focused instead of sending blind keystrokes
