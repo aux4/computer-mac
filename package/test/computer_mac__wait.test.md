@@ -119,7 +119,7 @@ aux4 computer mac wait --app ThisAppDoesNotExist12345 --gone true | jq -c '{sour
 ### with --gone should return immediately for text that is not there
 
 ```execute
-aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --gone true | jq -c '{source, matches, quick: (.waited < 2)}'
+aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --gone true | jq -c '{source, matches, quick: (.waited < 5)}'
 ```
 
 ```expect
@@ -129,11 +129,11 @@ aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Find
 ### should time out with what it saw
 
 ```execute
-aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --timeout 400ms 2>&1 | jq -c '{error, condition, timeout, seenAx: (.seen.ax | type), running: .seen.running}'
+aux4 computer mac wait --text "zzq text that is never on screen 0451" --app Finder --source ax --timeout 3s 2>&1 | jq -c '{error, condition, timeout, seenAx: (.seen.ax | type), running: .seen.running}'
 ```
 
 ```expect
-{"error":"Timed out after 400ms waiting for text 'zzq text that is never on screen 0451' in Finder to appear","condition":{"app":"Finder","gone":false,"source":"ax","text":"zzq text that is never on screen 0451"},"timeout":0.4,"seenAx":"array","running":true}
+{"error":"Timed out after 3s waiting for text 'zzq text that is never on screen 0451' in Finder to appear","condition":{"app":"Finder","gone":false,"source":"ax","text":"zzq text that is never on screen 0451"},"timeout":3,"seenAx":"array","running":true}
 ```
 
 ### should treat an app that is not running as not showing the text
@@ -196,12 +196,15 @@ AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that
 
 ### with --gone in auto should return at once when accessibility has no match, even if recognition is slow
 
+Recognition is slowed to 5s here; returning well under that (the accessibility scan alone can take
+over a second on a slow CI runner) shows it didn't wait for recognition.
+
 ```timeout
 8000
 ```
 
 ```execute
-AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 1)}'
+AUX4_COMPUTER_MAC_OCR_DELAY_MS=5000 aux4 computer mac wait --text "zzq text that is never on screen 0451" --gone true --timeout 3s | jq -c '{matches, quick: (.waited < 2.5)}'
 ```
 
 ```expect

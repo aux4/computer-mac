@@ -11,6 +11,7 @@ aux4 computer mac notes | grep '^### '
 ```expect
 ### Permissions (TCC)
 ### What works in the background
+### Disabled menu items and no keyboard focus aren't always "background"
 ### Silent data loss (documentEdited)
 ### OCR
 ### Coordinates and Retina
@@ -29,6 +30,20 @@ aux4 computer mac notes
 *Editing menu items are disabled in the background*
 **
 *sudo killall ANECompilerService*
+**
+```
+
+### should warn that a disabled item or no focus isn't always the background's fault
+
+```execute
+aux4 computer mac notes
+```
+
+```expect:partial
+**
+*no window open at all*, or only a panel/sheet/system dialog*
+**
+*errors* instead of sending blind keystrokes*
 **
 ```
 

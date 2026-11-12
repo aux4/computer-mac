@@ -176,3 +176,59 @@ aux4 computer mac state --app com.apple.TextEdit | jq -c '{bundleId: (.app.bundl
 ```expect
 {"bundleId":true,"hasTextArea":true}
 ```
+
+## no document window (diagnose the real cause, never blame-the-background or blind keystrokes)
+
+Closes every open document so only TextEdit's app chrome (no window, or an Open/Save panel with
+no document window) is left. A `type` with nothing focused must error instead of sending real
+keystrokes into nothing, and a disabled File menu item must say it's the missing document window,
+not "in the background" (TextEdit is still frontmost here).
+
+```timeout
+20000
+```
+
+```beforeAll
+# Close every open document through the app's own Accessibility tooling (no AppleScript/
+# Automation permission needed, unlike osascript): press the close button, and if that opens
+# a "keep this document?" sheet, press Delete/Don't Save, up to a few times.
+for i in 1 2 3 4 5; do
+  N=$(aux4 computer mac state --app TextEdit 2>/dev/null | jq -r '.windows | length // 0')
+  [ "$N" = "0" ] && break
+  CLOSE=$(aux4 computer mac state --app TextEdit 2>/dev/null | jq -r '[.windows[] | select(.ref != null)][0].ref // empty')
+  if [ -n "$CLOSE" ]; then
+    aux4 computer mac window close --app TextEdit > /dev/null 2>&1 || true
+  fi
+  for j in 1 2 3 4 5 6 7 8 9 10; do
+    aux4 computer mac dialog --app TextEdit > /tmp/computer-mac-notype-dialog.json 2>/dev/null || echo '{}' > /tmp/computer-mac-notype-dialog.json
+    jq -e '.dialog != null' /tmp/computer-mac-notype-dialog.json > /dev/null 2>&1 && break
+    sleep 0.2
+  done
+  BUTTON=$(jq -r '[.dialog.buttons[].title | select(test("^(Delete|Don.t Save)$"))][0] // empty' /tmp/computer-mac-notype-dialog.json 2>/dev/null)
+  if [ -n "$BUTTON" ]; then
+    aux4 computer mac dialog --app TextEdit --press "$BUTTON" --mode background > /dev/null 2>&1 || true
+  fi
+  sleep 0.3
+done
+rm -f /tmp/computer-mac-notype-dialog.json
+```
+
+### should refuse to type with nothing focused instead of sending blind keystrokes
+
+```execute
+aux4 computer mac type "hello" --app TextEdit --mode auto
+```
+
+```error:partial
+Nothing has keyboard focus in TextEdit*?
+```
+
+### should explain File > Save As is disabled because there is no document, not the background
+
+```execute
+aux4 computer mac menu --app TextEdit --path "File > Save As…"
+```
+
+```error:partial
+Could not press the menu item: menu item 'File > Save As…' is disabled: TextEdit has no*
+```

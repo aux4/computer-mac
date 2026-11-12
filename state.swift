@@ -300,7 +300,7 @@ func cmdState(_ args: [String]) {
             var label = ""
             var value = ""
             if keep {
-                label = axString(el, kAXTitleAttribute) ?? axString(el, kAXDescriptionAttribute) ?? ""
+                label = axLabel(el)
                 value = axString(el, kAXValueAttribute) ?? ""
                 if role == "AXStaticText" && label.isEmpty && value.isEmpty { keep = false }
             }
